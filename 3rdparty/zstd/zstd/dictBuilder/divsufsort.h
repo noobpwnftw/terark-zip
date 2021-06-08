@@ -31,7 +31,6 @@
 extern "C" {
 #endif /* __cplusplus */
 
-typedef int saidx_t;
 
 /*- Prototypes -*/
 

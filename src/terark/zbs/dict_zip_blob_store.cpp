@@ -1818,7 +1818,7 @@ void DictZipBlobStoreBuilder::entropyStore(std::unique_ptr<terark::DictZipBlobSt
         }
         else {
             tabLog = FSE_optimalTableLog(tabLog, dataSize, maxSym);
-            size_t err = FSE_normalizeCount(c->norm, tabLog, c->freq, dataSize, maxSym);
+            size_t err = FSE_normalizeCount(c->norm, tabLog, c->freq, dataSize, maxSym, dataSize >= 2048);
             if (FSE_isError(err)) {
                 unnecessary = true;
             }

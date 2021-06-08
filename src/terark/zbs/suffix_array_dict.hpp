@@ -9,6 +9,8 @@
 
 namespace terark {
 
+	typedef int saidx_t;
+
 // HashSuffixDictCacheDFA is much slower
 //#define Enable_HashSuffixDictCacheDFA
 #if defined(Enable_HashSuffixDictCacheDFA)

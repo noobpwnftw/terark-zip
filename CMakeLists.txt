@@ -16,7 +16,7 @@ INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/zstd)
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/boost-include)
 
 #----------- Extra Compiler Flags
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=haswell -DHAVE_SSE42 -DHAVE_PCLMUL -fPIC")
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -DHAVE_SSE42 -DHAVE_PCLMUL -fPIC")
 
 SET(BUILD_SUFFIX "d")
 IF(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -78,6 +78,12 @@ TARGET_INCLUDE_DIRECTORIES(terark-zip-${BUILD_SUFFIX} PUBLIC "$<BUILD_INTERFACE:
                                                               # expose boost headers in case someone need it
                                                               "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/boost-include>")
 
+option(WITH_TBB "build with Threading Building Blocks (TBB)" OFF)
+if(WITH_TBB)
+  find_package(TBB REQUIRED)
+  add_definitions(-DTERARK_WITH_TBB=1)
+  include_directories(${TBB_INCLUDE_DIR})
+endif()
 
 ############## Build gtests ###########
 IF(WITH_TESTS)
@@ -138,6 +144,7 @@ INSTALL(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/3rdparty/boost-include/lib
         PATTERN "libboost_context.a"
         PATTERN "libboost_system.a"
         PATTERN "libboost_filesystem.a"
+        PATTERN "libboost_thread.a"
 )
 
 

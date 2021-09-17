@@ -102,7 +102,7 @@ IF(WITH_TESTS)
     string(REPLACE ".cpp" "" test_name ${test_file})
     string(REGEX REPLACE "^((.+)/)+" "" test_name ${test_name})
     add_executable(${test_name} ${test_file})
-    target_link_libraries(${test_name} gtest)
+    target_link_libraries(${test_name} gtest terark-zip-${BUILD_SUFFIX})
   endforeach()
 ENDIF()
 

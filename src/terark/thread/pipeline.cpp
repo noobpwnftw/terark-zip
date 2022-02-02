@@ -19,7 +19,6 @@
 #include <iostream>
 
 #include <boost/fiber/all.hpp>
-#include "fiber_yield.hpp"
 
 // http://predef.sourceforge.net/
 
@@ -59,9 +58,9 @@ typedef util::concurrent_queue<circular_queue<PipelineQueueItem> > base_queue;
 class PipelineStage::queue_t {
 public:
     virtual ~queue_t() {}
-    virtual void push_back(const PipelineQueueItem& x, FiberYield*) = 0;
-    virtual bool push_back(const PipelineQueueItem&, int timeout, FiberYield*) = 0;
-    virtual bool pop_front(PipelineQueueItem& x, int timeout, FiberYield*) = 0;
+    virtual void push_back(const PipelineQueueItem& x) = 0;
+    virtual bool push_back(const PipelineQueueItem&, int timeout) = 0;
+    virtual bool pop_front(PipelineQueueItem& x, int timeout) = 0;
     virtual bool empty() = 0;
     virtual size_t size() = 0;
     virtual size_t peekSize() const = 0;
@@ -73,13 +72,13 @@ public:
 	BlockQueue(size_t size) : q(size) {
 		q.queue().init(size + 1);
 	}
-	void push_back(const PipelineQueueItem& x, FiberYield*) final {
+	void push_back(const PipelineQueueItem& x) final {
 	    q.push_back(x);
 	}
-    bool push_back(const PipelineQueueItem& x, int timeout, FiberYield*) final {
+    bool push_back(const PipelineQueueItem& x, int timeout) final {
 	    return q.push_back(x, timeout);
 	}
-    bool pop_front(PipelineQueueItem& x, int timeout, FiberYield*) final {
+    bool pop_front(PipelineQueueItem& x, int timeout) final {
         return q.pop_front(x, timeout);
     }
     bool empty() final {return q.empty(); }
@@ -91,24 +90,24 @@ class FiberQueue : public PipelineStage::queue_t {
     circular_queue<PipelineQueueItem> q;
 public:
     FiberQueue(size_t size) : q(size) {}
-	void push_back(const PipelineQueueItem& x, FiberYield* fy) final {
+	void push_back(const PipelineQueueItem& x) final {
         while (q.full()) {
-            fy->yield();
+            boost::this_fiber::yield();
         }
         q.push_back(x);
 	}
-    bool push_back(const PipelineQueueItem& x, int timeout, FiberYield* fy) final {
+    bool push_back(const PipelineQueueItem& x, int timeout) final {
         int estimate_loops = timeout * 8; // assume 8 scheduals takes 1 ms
         for (int i = 0; i < estimate_loops; i++) {
             if (!q.full()) {
                 q.push_back(x);
                 return true;
             }
-            fy->yield();
+            boost::this_fiber::yield();
         }
         return false;
     }
-    bool pop_front(PipelineQueueItem& x, int timeout, FiberYield* fy) final {
+    bool pop_front(PipelineQueueItem& x, int timeout) final {
         int estimate_loops = timeout * 8; // assume 8 scheduals takes 1 ms
         for (int i = 0; i < estimate_loops; i++) {
             if (!q.empty()) {
@@ -116,7 +115,7 @@ public:
                 q.pop_front();
                 return true;
             }
-            fy->yield();
+            boost::this_fiber::yield();
         }
         return false;
     }
@@ -131,21 +130,21 @@ public:
 	MixedQueue(size_t size) : q(size) {
 		q.queue().init(size + 1);
 	}
-	void push_back(const PipelineQueueItem& x, FiberYield* fy) final {
+	void push_back(const PipelineQueueItem& x) final {
 		if (q.peekFull()) {
-			fy->yield();
+            boost::this_fiber::yield();
 		}
 	    q.push_back(x);
 	}
-    bool push_back(const PipelineQueueItem& x, int timeout, FiberYield* fy) final {
+    bool push_back(const PipelineQueueItem& x, int timeout) final {
 		if (q.peekFull()) {
-			fy->yield();
+            boost::this_fiber::yield();
 		}
         return q.push_back(x, timeout);
 	}
-    bool pop_front(PipelineQueueItem& x, int timeout, FiberYield* fy) final {
+    bool pop_front(PipelineQueueItem& x, int timeout) final {
 		if (q.peekEmpty()) {
-			fy->yield();
+            boost::this_fiber::yield();
 		}
         return q.pop_front(x, timeout);
     }
@@ -170,7 +169,6 @@ public:
     virtual ~ExecUnit() {}
     virtual void join() = 0;
     virtual bool joinable() const = 0;
-    virtual FiberYield* get_fiber_yield() = 0;
 };
 class ThreadExecUnit : public PipelineStage::ExecUnit {
     thread thr;
@@ -180,26 +178,21 @@ public:
 
     void join() final { thr.join(); }
     bool joinable() const final { return thr.joinable(); }
-    FiberYield* get_fiber_yield() override { return NULL; }
 };
 class FiberExecUnit : public PipelineStage::ExecUnit {
     boost::fibers::fiber fib;
-    FiberYield fy;
 public:
     template<class Func>
     FiberExecUnit(Func&& f) : fib(std::move(f)) {}
 
     void join() final { fib.join(); }
     bool joinable() const final { return fib.joinable(); }
-    FiberYield* get_fiber_yield() final { return &fy; }
 };
 class MixedExecUnit : public ThreadExecUnit {
-    FiberYield fy;
 public:
     template<class MakeFunc>
     MixedExecUnit(int nfib, MakeFunc mkfn)
  : ThreadExecUnit([=]() {
-        fy.init_in_fiber_thread();
         const int spawn_num = nfib-1;
         valvec<boost::fibers::fiber> fibs(spawn_num, valvec_reserve());
         for (int i = 0; i < spawn_num; ++i) {
@@ -212,7 +205,6 @@ public:
     }){
         assert(nfib > 0);
     }
-    FiberYield* get_fiber_yield() final { return &fy; }
 };
 template<class Function>
 PipelineStage::ExecUnit* NewExecUnit(bool fiberMode, Function&& func) {
@@ -474,11 +466,10 @@ void PipelineStage::run_wrapper(int threadno)
 		if (m_prev != m_owner->m_head)
 		{ // 不是第一个 step, 清空前一个 step 的 out_queue
 		    WaitPtr(m_threads[threadno].m_thread);
-		    FiberYield* fy = m_threads[threadno].m_thread->get_fiber_yield();
 			while (!m_prev->m_out_queue->empty() || m_prev->isRunning())
 			{
 				PipelineQueueItem item;
-				if (m_prev->m_out_queue->pop_front(item, m_owner->m_queue_timeout, fy))
+				if (m_prev->m_out_queue->pop_front(item, m_owner->m_queue_timeout))
 				{
 					if (item.task)
 						m_owner->destroyTask(item.task);
@@ -525,7 +516,6 @@ void PipelineStage::run_step_first(int threadno)
 	assert(ple_none == m_pl_enum || ple_generate == m_pl_enum);
 	assert(this->m_threads.size() == 1);
 	WaitPtr(m_threads[threadno].m_thread);
-	FiberYield* fy = m_threads[threadno].m_thread->get_fiber_yield();
 	while (m_owner->isRunning())
 	{
 		PipelineQueueItem item;
@@ -538,11 +528,11 @@ void PipelineStage::run_step_first(int threadno)
 				item.plserial = ++m_plserial;
 			}
 			if (m_owner->m_logLevel >= 3) {
-                while (!m_out_queue->push_back(item, m_owner->m_queue_timeout, fy)) {
+                while (!m_out_queue->push_back(item, m_owner->m_queue_timeout)) {
                     fprintf(stderr, "Pipeline: first_step(%s): tno=%d, wait push timeout, retry ...\n", m_step_name.c_str(), threadno);
                 }
 			} else {
-			    m_out_queue->push_back(item, fy);
+			    m_out_queue->push_back(item);
 			}
 		}
 	}
@@ -553,11 +543,10 @@ void PipelineStage::run_step_last(int threadno)
 	assert(ple_none == m_pl_enum);
 
 	WaitPtr(m_threads[threadno].m_thread);
-	FiberYield* fy = m_threads[threadno].m_thread->get_fiber_yield();
 	while (isPrevRunning())
 	{
 		PipelineQueueItem item;
-		if (m_prev->m_out_queue->pop_front(item, m_owner->m_queue_timeout, fy))
+		if (m_prev->m_out_queue->pop_front(item, m_owner->m_queue_timeout))
 		{
 			if (item.task)
 				process(threadno, &item);
@@ -581,11 +570,10 @@ void PipelineStage::run_step_mid(int threadno)
 	}
 
 	WaitPtr(m_threads[threadno].m_thread);
-	FiberYield* fy = m_threads[threadno].m_thread->get_fiber_yield();
 	while (isPrevRunning())
 	{
 		PipelineQueueItem item;
-		if (m_prev->m_out_queue->pop_front(item, m_owner->m_queue_timeout, fy))
+		if (m_prev->m_out_queue->pop_front(item, m_owner->m_queue_timeout))
 		{
 			if (ple_generate == m_pl_enum) {
 			// only 1 thread, do not mutex lock
@@ -596,7 +584,7 @@ void PipelineStage::run_step_mid(int threadno)
 			if (item.task)
 				process(threadno, &item);
 			if (item.task || m_owner->m_keepSerial)
-				m_out_queue->push_back(item, fy);
+				m_out_queue->push_back(item);
 		}
 		else {
 		    if (m_owner->m_logLevel >= 3) {
@@ -653,12 +641,11 @@ void PipelineStage::run_serial_step_slow(int threadno,
 	assert(0 == threadno);
 	using namespace std;
 	WaitPtr(m_threads[threadno].m_thread);
-	FiberYield* fy = m_threads[threadno].m_thread->get_fiber_yield();
 	valvec<PipelineQueueItem> cache;
 	m_plserial = 1;
 	while (isPrevRunning()) {
 		PipelineQueueItem item;
-		if (!m_prev->m_out_queue->pop_front(item, m_owner->m_queue_timeout, fy))
+		if (!m_prev->m_out_queue->pop_front(item, m_owner->m_queue_timeout))
         {
 		    if (m_owner->m_logLevel >= 3) {
 		        fprintf(stderr, "Pipeline: serial_step_slow(%s): tno=%d, wait pop timeout, retry ...\n", m_step_name.c_str(), threadno);
@@ -703,14 +690,13 @@ void PipelineStage::run_serial_step_fast(int threadno)
 	using namespace std;
 	const bool is_last = this == m_owner->m_head->m_prev;
 	WaitPtr(m_threads[threadno].m_thread);
-	FiberYield* fy = m_threads[threadno].m_thread->get_fiber_yield();
 	const ptrdiff_t nlen = TERARK_IF_DEBUG(4, 64); // should power of 2
 	ptrdiff_t head = 0;
 	valvec<PipelineQueueItem> cache(nlen), overflow;
 	m_plserial = 1; // this is expected_serial
 	while (isPrevRunning()) {
 		PipelineQueueItem item;
-		if (!m_prev->m_out_queue->pop_front(item, m_owner->m_queue_timeout, fy))
+		if (!m_prev->m_out_queue->pop_front(item, m_owner->m_queue_timeout))
         {
 		    if (m_owner->m_logLevel >= 3) {
 		        fprintf(stderr, "Pipeline: serial_step_fast(%s): tno=%d, prev.live_exec = %d, wait pop timeout, retry ...\n", m_step_name.c_str(), threadno, m_prev->m_running_exec_units);
@@ -751,7 +737,7 @@ void PipelineStage::run_serial_step_fast(int threadno)
                     m_owner->destroyTask(item.task);
 			}
 			else {
-            	m_out_queue->push_back(item, fy);
+            	m_out_queue->push_back(item);
 			}
 
 			cache[head] = PipelineQueueItem(); // clear
@@ -780,7 +766,7 @@ void PipelineStage::run_serial_step_fast(int threadno)
                 m_owner->destroyTask(i->task);
         }
         else {
-            m_out_queue->push_back(*i, fy);
+            m_out_queue->push_back(*i);
         }
 	}
 }
@@ -1017,17 +1003,16 @@ void PipelineProcessor::enqueue(PipelineTask* task)
 }
 
 void PipelineProcessor::enqueue_impl(PipelineTask* task) {
-    FiberYield fy;
 	PipelineQueueItem item(++m_head->m_plserial, task);
     if (m_logLevel >= 3) {
-        while (!m_head->m_out_queue->push_back(item, m_queue_timeout, &fy)) {
+        while (!m_head->m_out_queue->push_back(item, m_queue_timeout)) {
             fprintf(stderr,
                     "Pipeline: enqueue_1: wait push timeout, serial = %lld, retry ...\n",
                     (llong)item.plserial);
         }
     }
     else {
-        m_head->m_out_queue->push_back(item, &fy);
+        m_head->m_out_queue->push_back(item);
     }
 }
 
@@ -1041,13 +1026,12 @@ void PipelineProcessor::enqueue(PipelineTask** tasks, size_t num) {
     }
 }
 void PipelineProcessor::enqueue_impl(PipelineTask** tasks, size_t num) {
-    FiberYield fy;
 	uintptr_t plserial = m_head->m_plserial;
 	auto queue = m_head->m_out_queue;
     if (m_logLevel >= 3) {
         for (size_t i = 0; i < num; ++i) {
             PipelineQueueItem item(++plserial, tasks[i]);
-            while (!queue->push_back(item, m_queue_timeout, &fy)) {
+            while (!queue->push_back(item, m_queue_timeout)) {
                 fprintf(stderr,
                         "Pipeline: enqueue(num=%zd): nth=%zd, wait push timeout, serial = %lld, retry ...\n",
                         num, i, (llong)item.plserial);
@@ -1056,7 +1040,7 @@ void PipelineProcessor::enqueue_impl(PipelineTask** tasks, size_t num) {
     }
     else {
         for (size_t i = 0; i < num; ++i) {
-            queue->push_back(PipelineQueueItem(++plserial, tasks[i]), &fy);
+            queue->push_back(PipelineQueueItem(++plserial, tasks[i]));
         }
     }
 	m_head->m_plserial = plserial;

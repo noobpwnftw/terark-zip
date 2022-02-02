@@ -5,8 +5,7 @@
  *      Author: leipeng
  */
 
-#ifndef TERARK_RANK_SELECT_INLINE_SLOW_HPP_
-#define TERARK_RANK_SELECT_INLINE_SLOW_HPP_
+#pragma once
 
 #include <terark/util/throw.hpp>
 
@@ -17,6 +16,7 @@ namespace terark {
 inline unsigned UintSelect1(uint64_t x, unsigned r) {
     assert(0 != x);
 #if defined(NDEBUG)
+/*
     if (terark_unlikely(r >= (unsigned)fast_popcount(x))) {
         fprintf(stderr
             , "%s:%d: assert(r < popcnt(x)) fail: r=%u, popcnt(x)=%d"
@@ -24,6 +24,7 @@ inline unsigned UintSelect1(uint64_t x, unsigned r) {
             , r, (int)fast_popcount(x));
         abort();
     }
+*/
 #else
     unsigned nPopCnt = (unsigned)fast_popcount(x);
     assert(r < nPopCnt);
@@ -63,7 +64,3 @@ inline unsigned UintSelect1(uint64_t x, unsigned r) {
 #define TERARK_GET_BITS_64(u64,k,width) ( k ? (u64 >> (k-1)*width) & ((1<<width)-1) : 0 )
 
 } // namespace terark
-
-
-
-#endif /* TERARK_RANK_SELECT_INLINE_SLOW_HPP_ */

@@ -1,20 +1,20 @@
-#ifndef __terark_int_vector_hpp__
-#define __terark_int_vector_hpp__
+#pragma once
 
 #include "bitmap.hpp"
 #include <terark/util/throw.hpp>
+#include <array>
 
 namespace terark {
 
 class OutputBuffer;
 
-// memory layout is binary compatible to SortedUintVec
+// memory layout is binary compatible to SortedUintVec on 64 bit platform
 class TERARK_DLL_EXPORT UintVecMin0Base {
 protected:
-	valvec<byte> m_data;
-	size_t m_bits;
-	size_t m_mask;
-	size_t m_size;
+	valvec<byte> m_data; // corresponding to SortedUintVec::m_data
+	size_t m_bits; // corresponding to SortedUintVec::XXXX, m_bits <= 64
+	size_t m_mask; // corresponding to SortedUintVec::m_index
+	size_t m_size; // corresponding to SortedUintVec::m_size
 
 	void nullize() {
 		m_bits = 0;
@@ -31,41 +31,20 @@ public:
 		resize_with_wire_max_val(num, max_val);
 	}
 	UintVecMin0Base() { nullize(); }
+	UintVecMin0Base(const UintVecMin0Base&);
+	UintVecMin0Base& operator=(const UintVecMin0Base&);
+	UintVecMin0Base(UintVecMin0Base&&) = default;
+	UintVecMin0Base& operator=(UintVecMin0Base&&) = default;
 
-	void clear() { m_data.clear(); nullize(); }
+	~UintVecMin0Base();
 
-    void shrink_to_fit() {
-        resize(m_size);
-        m_data.shrink_to_fit();
-    }
+	void clear();
 
-	void swap(UintVecMin0Base& y) {
-		m_data.swap(y.m_data);
-		std::swap(m_bits, y.m_bits);
-		std::swap(m_mask, y.m_mask);
-		std::swap(m_size, y.m_size);
-	}
-
-	void risk_release_ownership() {
-		m_data.risk_release_ownership();
-		nullize();
-	}
-
-	void risk_destroy(MemType mt) {
-		m_data.risk_destroy(mt);
-		nullize();
-	}
-
-	void risk_set_data(byte* Data, size_t num, size_t bits) {
-		assert(m_bits <= 64);
-		assert(bits <= sizeof(size_t) * 8);
-		size_t Bytes = 0==num ? 0 : (bits*num + 7) / 8 + sizeof(size_t)-1 + 15;
-		Bytes &= ~size_t(15); // align to 16
-		m_bits = bits;
-		m_mask = sizeof(size_t)*8 == bits ? size_t(-1) : (size_t(1)<<bits)-1;
-		m_size = num;
-		m_data.risk_set_data(Data, Bytes);
-	}
+	void shrink_to_fit();
+	void swap(UintVecMin0Base&);
+	void risk_release_ownership();
+	void risk_destroy(MemType);
+	void risk_set_data(byte* Data, size_t num, size_t bits);
 
 	const byte* data() const { return m_data.data(); }
 	size_t uintbits() const { return m_bits; }
@@ -73,13 +52,7 @@ public:
 	size_t size() const { return m_size; }
 	size_t mem_size() const { return m_data.size(); }
 
-	void resize(size_t newsize) {
-		assert(m_bits <= 64);
-		size_t bytes = 0==newsize ? 0 : (m_bits*newsize + 7) / 8 + sizeof(size_t)-1 + 15;
-		bytes &= ~size_t(15); // align to 16
-		m_data.resize(bytes, 0);
-		m_size = newsize;
-	}
+	void resize(size_t newsize);
 
 	void set_wire(size_t idx, size_t val) {
 		assert(idx < m_size);
@@ -99,24 +72,14 @@ public:
 		resize_with_uintbits(num, bits);
 	}
 
-	void resize_with_uintbits(size_t num, size_t bits) {
-		assert(m_bits <= 64);
-		clear();
-		m_bits = bits;
-		m_mask = sizeof(size_t)*8 == bits ? size_t(-1) : (size_t(1)<<bits)-1;
-		m_size = num;
-		if (num) {
-			m_data.resize_fill(compute_mem_size(bits, num));
-		}
-	}
+	void resize_with_uintbits(size_t num, size_t bit_width);
 
 private:
 	terark_no_inline void push_back_slow_path(size_t val);
 public:
 	void push_back(size_t val) {
 		assert(m_bits <= 64);
-		if (compute_mem_size(m_bits, m_size+1) < m_data.size()
-                && val <= m_mask) {
+		if (compute_mem_size(m_bits, m_size+1) < m_data.size() && val <= m_mask) {
             set_wire(m_size++, val);
 		} else {
 			push_back_slow_path(val);
@@ -224,6 +187,16 @@ public:
     aVals[0] = fast_get(data, bits, mask, idx);
     aVals[1] = fast_get(data, bits, mask, idx+1);
   }
+  std::array<size_t,2> get2(size_t idx) const {
+    const byte*  data = m_data.data();
+    const size_t bits = m_bits;
+    const size_t mask = m_mask;
+    assert(m_bits <= 58);
+	std::array<size_t,2> aVals;
+    aVals[0] = fast_get(data, bits, mask, idx);
+    aVals[1] = fast_get(data, bits, mask, idx+1);
+	return aVals;
+  }
   static
   size_t fast_get(const byte* data, size_t bits, size_t mask, size_t idx) {
     assert(bits <= 58);
@@ -266,6 +239,16 @@ public:
     assert(bits <= 64);
     aVals[0] = febitvec::s_get_uint(data, pos, bits);
     aVals[1] = febitvec::s_get_uint(data, pos + bits, bits);
+  }
+  std::array<size_t, 2> get2(size_t idx) const {
+    const size_t* data = (const size_t*)m_data.data();
+    const size_t  bits = m_bits;
+    const size_t  pos = bits * idx;
+    assert(bits <= 64);
+	std::array<size_t, 2> aVals;
+    aVals[0] = febitvec::s_get_uint(data, pos, bits);
+    aVals[1] = febitvec::s_get_uint(data, pos + bits, bits);
+	return aVals;
   }
   static
   size_t fast_get(const byte* data, size_t bits, size_t idx) {
@@ -337,6 +320,16 @@ public:
 		aVals[0] = fast_get(data, bits, mask, minVal, idx);
 		aVals[1] = fast_get(data, bits, mask, minVal, idx+1);
 	}
+	std::array<Int,2> get2(size_t idx) const {
+		const byte*  data = m_data.data();
+		const size_t bits = m_bits;
+		const size_t mask = m_mask;
+		Int minVal = m_min_val;
+		std::array<Int,2> aVals;
+		aVals[0] = fast_get(data, bits, mask, minVal, idx);
+		aVals[1] = fast_get(data, bits, mask, minVal, idx+1);
+		return aVals;
+	}
 	static
 	Int fast_get(const byte* data, size_t bits, size_t mask,
 				    size_t minVal, size_t idx) {
@@ -400,6 +393,3 @@ typedef ZipIntVector<size_t>   UintVector;
 typedef ZipIntVector<intptr_t> SintVector;
 
 } // namespace terark
-
-#endif // __terark_int_vector_hpp__
-

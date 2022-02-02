@@ -55,6 +55,11 @@ static constexpr uint08_t FLAG_lock      = 0x1 << 7;
 #undef prefetch
 #define prefetch(ptr) _mm_prefetch((const char*)(ptr), _MM_HINT_T0)
 
+#if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__x86_64) || defined(__amd64__) || defined(__amd64)
+#else
+   #define _mm_pause()
+#endif
+
 inline void cas_unlock(bool& lock) {
     as_atomic(lock).store(false, std::memory_order_release);
 }
@@ -2964,7 +2969,7 @@ bool Patricia::TokenBase::dequeue(Patricia* trie1, TokenBase* delptrs[], size_t*
                 p = p->m_link.next;
             }
         #endif
-            if (cax_weak(curr->m_flags, flags, {AcquireDone, true})) {
+            if (cas_weak(curr->m_flags, flags, {AcquireDone, true})) {
                 trie->m_dummy.m_min_age = min_age;
                 trie->m_dummy.m_link.next = curr;
                 curr->m_min_age = min_age;
@@ -3073,7 +3078,7 @@ void Patricia::TokenBase::mt_acquire(Patricia* trie1) {
         cas_unlock(trie->m_head_lock);
         break;
     case ReleaseWait:
-        if (cax_weak(m_flags, flags, {AcquireDone, false})) {
+        if (cas_weak(m_flags, flags, {AcquireDone, false})) {
             // acquire done, no one should change me
             assert(AcquireDone == m_flags.state);
         }

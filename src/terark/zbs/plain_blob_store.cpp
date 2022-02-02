@@ -208,8 +208,7 @@ void
 PlainBlobStore::get_record_append_imp(size_t recID, valvec<byte_t>* recData)
 const {
     assert(recID + 1 < m_offsets.size());
-    size_t BegEnd[2];
-    m_offsets.get2(recID, BegEnd);
+    auto BegEnd = m_offsets.get2(recID);
     assert(BegEnd[0] <= BegEnd[1]);
     assert(BegEnd[1] <= m_content.size());
     size_t len = BegEnd[1] - BegEnd[0];
@@ -243,8 +242,7 @@ PlainBlobStore::fspread_record_append_imp(pread_func_t fspread, void* lambda,
                                           valvec<byte_t>* rdbuf)
 const {
     assert(recID + 1 < m_offsets.size());
-    size_t BegEnd[2];
-    m_offsets.get2(recID, BegEnd);
+    auto BegEnd = m_offsets.get2(recID);
     assert(BegEnd[0] <= BegEnd[1]);
     assert(BegEnd[1] <= m_content.size());
     size_t len = BegEnd[1] - BegEnd[0];

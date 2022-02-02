@@ -34,11 +34,11 @@ NestTrieDAWG(const NestTrieDAWG& y)
 , m_zpNestLevel(y.m_zpNestLevel)
 , m_cache(NULL) // don't copy
 {
-    assert(256 == y.m_dyn_sigma);
+	assert(256 == y.m_dyn_sigma);
 	if (y.m_trie)
 		m_trie = new NestTrie(*y.m_trie);
-    else
-        m_trie = NULL;
+	else
+		m_trie = NULL;
 }
 
 template<class NestTrie, class DawgType>
@@ -54,7 +54,7 @@ operator=(const NestTrieDAWG& y) {
 }
 
 template<class NestTrie, class DawgType>
-void NestTrieDAWG<NestTrie, DawgType>::swap(NestTrieDAWG& y) {
+void NestTrieDAWG<NestTrie, DawgType>::swap(NestTrieDAWG& y) noexcept {
 	BaseDFA::risk_swap(y);
 	std::swap(n_words, y.n_words);
 	IsTermRep::swap(y);
@@ -62,13 +62,13 @@ void NestTrieDAWG<NestTrie, DawgType>::swap(NestTrieDAWG& y) {
 
 template<class NestTrie, class DawgType>
 size_t NestTrieDAWG<NestTrie, DawgType>::
-state_move_slow(size_t parent, auchar_t ch, StateMoveContext& ctx) const {
+state_move_slow(size_t parent, auchar_t ch, StateMoveContext& ctx) const noexcept {
 	return m_trie->state_move_slow(parent, ch, ctx);
 }
 
 template<class NestTrie, class DawgType>
 size_t NestTrieDAWG<NestTrie, DawgType>::
-state_move_fast(size_t parent, auchar_t ch, size_t n_children, size_t child0) const {
+state_move_fast(size_t parent, auchar_t ch, size_t n_children, size_t child0) const noexcept {
 	return m_trie->state_move_fast(parent, ch, n_children, child0);
 }
 
@@ -100,15 +100,15 @@ bool NestTrieDAWG<NestTrie, DawgType>::has_freelist() const {
 template<class NestTrie, class DawgType>
 size_t
 NestTrieDAWG<NestTrie, DawgType>::
-state_move(size_t curr, auchar_t ch) const {
+state_move(size_t curr, auchar_t ch) const noexcept {
 	return m_trie->state_move(curr, ch);
 }
 
 template<class NestTrie, class DawgType>
 fstring
 NestTrieDAWG<NestTrie, DawgType>::
-get_zpath_data(size_t s, MatchContext* ctx) const {
-    return m_trie->get_zpath_data(s, ctx);
+get_zpath_data(size_t s, MatchContext* ctx) const noexcept {
+	return m_trie->get_zpath_data(s, ctx);
 }
 
 template<class NestTrie, class DawgType>
@@ -121,39 +121,59 @@ NestTrieDAWG<NestTrie, DawgType>::mem_size() const {
 template<class NestTrie, class DawgType>
 //terark_flatten
 size_t NestTrieDAWG<NestTrie, DawgType>::
-index(MatchContext& ctx, fstring str) const {
-    assert(m_trie->m_is_link.max_rank1() == this->m_zpath_states);
-    if (m_trie->m_is_link.max_rank1() > 0)
-        return index_impl<true>(ctx, str);
-    else
-        return index_impl<false>(ctx, str);
+index(MatchContext& ctx, fstring str) const noexcept {
+	assert(m_trie->m_is_link.max_rank1() == this->m_zpath_states);
+	if (this->m_zpath_states > 0)
+		return index_impl_ctx<true>(ctx, str);
+	else
+		return index_impl_ctx<false>(ctx, str);
 }
 
 template<class NestTrie, class DawgType>
 //terark_flatten
 size_t
-NestTrieDAWG<NestTrie, DawgType>::index(fstring str) const {
-    assert(m_trie->m_is_link.max_rank1() == this->m_zpath_states);
-    if (m_trie->m_is_link.max_rank1() > 0)
-        return index_impl<true>(str);
-    else
-        return index_impl<false>(str);
+NestTrieDAWG<NestTrie, DawgType>::index(fstring str) const noexcept {
+	assert(m_trie->m_is_link.max_rank1() == this->m_zpath_states);
+	if (this->m_zpath_states > 0)
+		return index_impl_11(str); // try da cache
+	else
+		return index_impl_01(str); // try da cache
 }
 
 template<class NestTrie, class DawgType>
-template<bool HasLink>
-terark_flatten
+terark_flatten size_t
+NestTrieDAWG<NestTrie, DawgType>::index_impl_00(fstring str)
+const noexcept { return index_impl<0,0>(str); }
+
+template<class NestTrie, class DawgType>
+terark_flatten size_t
+NestTrieDAWG<NestTrie, DawgType>::index_impl_01(fstring str)
+const noexcept { return index_impl<0,1>(str); }
+
+template<class NestTrie, class DawgType>
+terark_flatten size_t
+NestTrieDAWG<NestTrie, DawgType>::index_impl_10(fstring str)
+const noexcept { return index_impl<1,0>(str); }
+
+template<class NestTrie, class DawgType>
+terark_flatten size_t
+NestTrieDAWG<NestTrie, DawgType>::index_impl_11(fstring str)
+const noexcept { return index_impl<1,1>(str); }
+
+template<class NestTrie, class DawgType>
+template<bool HasLink, bool TryDACache>
+terark_forceinline
 size_t NestTrieDAWG<NestTrie, DawgType>::
-index_impl(fstring str) const {
+index_impl(fstring str) const noexcept {
 	assert(HasLink == (m_trie->m_is_link.max_rank1() > 0));
 	auto trie = m_trie;
-    size_t curr = initial_state;
+	size_t curr = initial_state;
 	size_t i = 0;
 	auto loudsBits = trie->m_louds.bldata();
 	auto loudsSel0 = trie->m_louds.get_sel0_cache();
 	auto loudsRank = trie->m_louds.get_rank_cache();
 	auto labelData = trie->m_label_data;
-	if (terark_unlikely(NULL != m_cache)) {
+	if (TryDACache && terark_unlikely(NULL != m_cache)) {
 		auto da = m_cache->get_double_array();
 		auto zpBase = m_cache->get_zpath_data_base();
 		while (true) {
@@ -163,7 +183,7 @@ index_impl(fstring str) const {
 				if (offset0 < offset1) {
 					const byte_t* zs = zpBase + offset0;
 					const size_t  zn = offset1 - offset0;
-                    _mm_prefetch((const char*)zs, _MM_HINT_T0);
+					_mm_prefetch((const char*)zs, _MM_HINT_T0);
 					if (i + zn > str.size())
 						return null_word;
 					const byte_t* zk = (const byte_t*)(str.p + i);
@@ -193,10 +213,10 @@ index_impl(fstring str) const {
 				size_t map_state = da[curr].m_map_state;
 				assert(map_state < trie->total_states());
 				byte_t ch = (byte_t)str.p[i];
-                if (HasLink)
-                    curr = trie->state_move_fast2(map_state, ch, labelData, loudsBits, loudsSel0, loudsRank);
-                else
-		            curr = trie->template state_move_smart<HasLink>(map_state, ch);
+				if (HasLink || trie->is_fast_label)
+					curr = trie->state_move_fast2(map_state, ch, labelData, loudsBits, loudsSel0, loudsRank);
+				else
+					curr = trie->template state_move_smart<HasLink>(map_state, ch);
 				if (terark_likely(nil_state != curr)) {
 					i++;
 					break;
@@ -221,10 +241,10 @@ index_impl(fstring str) const {
 				return null_word;
 		}
 		byte_t ch = (byte_t)str.p[i];
-        if (HasLink)
-            curr = trie->state_move_fast2(curr, ch, labelData, loudsBits, loudsSel0, loudsRank);
-        else
-		    curr = trie->template state_move_smart<HasLink>(curr, ch);
+		if (HasLink || trie->is_fast_label)
+			curr = trie->state_move_fast2(curr, ch, labelData, loudsBits, loudsSel0, loudsRank);
+		else
+			curr = trie->template state_move_smart<HasLink>(curr, ch);
 	}
 	return null_word;
 }
@@ -233,16 +253,20 @@ template<class NestTrie, class DawgType>
 template<bool HasLink>
 terark_flatten
 size_t NestTrieDAWG<NestTrie, DawgType>::
-index_impl(MatchContext& ctx, fstring str) const {
+index_impl_ctx(MatchContext& ctx, fstring str) const noexcept {
 	assert(HasLink == (m_trie->m_is_link.max_rank1() > 0));
 //	assert(0 == ctx.pos);
 //	assert(0 == ctx.zidx);
 	size_t curr = ctx.root;
 	if (0 == (curr | ctx.pos | ctx.zidx)) {
-        return index_impl<HasLink>(str);
+		return index_impl<HasLink>(str);
 	}
 	else {
-    	auto trie = m_trie;
+		auto trie = m_trie;
+		auto loudsBits = trie->m_louds.bldata();
+		auto loudsSel0 = trie->m_louds.get_sel0_cache();
+		auto loudsRank = trie->m_louds.get_rank_cache();
+		auto labelData = trie->m_label_data;
 		size_t i = ctx.pos;
 		size_t j = ctx.zidx;
 		for (; nil_state != curr; ++i) {
@@ -273,61 +297,64 @@ index_impl(MatchContext& ctx, fstring str) const {
 					return null_word;
 			}
 			byte_t ch = (byte_t)str.p[i];
-			curr = trie->template state_move_smart<HasLink>(curr, ch);
+			if (HasLink || trie->is_fast_label)
+				curr = trie->state_move_fast2(curr, ch, labelData, loudsBits, loudsSel0, loudsRank);
+			else
+				curr = trie->template state_move_smart<HasLink>(curr, ch);
 		}
-    	return null_word;
+		return null_word;
 	}
 }
 
 template<class NestTrie, class DawgType>
 //terark_flatten
 void NestTrieDAWG<NestTrie, DawgType>::
-lower_bound(MatchContext& ctx, fstring word, size_t* index, size_t* dict_rank) const {
-    assert(index || dict_rank);
-    m_trie->lower_bound(ctx, word, index, dict_rank, m_cache, getIsTerm());
+lower_bound(MatchContext& ctx, fstring word, size_t* index, size_t* dict_rank) const noexcept {
+	assert(index || dict_rank);
+	m_trie->lower_bound(ctx, word, index, dict_rank, m_cache, getIsTerm());
 }
 
 template<class NestTrie, class DawgType>
 size_t NestTrieDAWG<NestTrie, DawgType>::
-index_begin() const {
-    size_t node_id = m_trie->state_begin(getIsTerm());
-    return node_id != size_t(-1) ? getIsTerm().rank1(node_id) : size_t(-1);
+index_begin() const noexcept {
+	size_t node_id = m_trie->state_begin(getIsTerm());
+	return node_id != size_t(-1) ? getIsTerm().rank1(node_id) : size_t(-1);
 }
 
 template<class NestTrie, class DawgType>
 size_t NestTrieDAWG<NestTrie, DawgType>::
-index_end() const {
-    size_t node_id = m_trie->state_end(getIsTerm());
-    return node_id != size_t(-1) ? getIsTerm().rank1(node_id) : size_t(-1);
+index_end() const noexcept {
+	size_t node_id = m_trie->state_end(getIsTerm());
+	return node_id != size_t(-1) ? getIsTerm().rank1(node_id) : size_t(-1);
 }
 
 template<class NestTrie, class DawgType>
 size_t NestTrieDAWG<NestTrie, DawgType>::
-index_next(size_t nth) const {
-    assert(nth < this->n_words);
-    size_t node_id = getIsTerm().select1(nth);
-    assert(node_id < getIsTerm().size());
-    assert(getIsTerm()[node_id]);
-    node_id = m_trie->state_next(node_id, getIsTerm());
-    return node_id != size_t(-1) ? getIsTerm().rank1(node_id) : size_t(-1);
+index_next(size_t nth) const noexcept {
+	assert(nth < this->n_words);
+	size_t node_id = getIsTerm().select1(nth);
+	assert(node_id < getIsTerm().size());
+	assert(getIsTerm()[node_id]);
+	node_id = m_trie->state_next(node_id, getIsTerm());
+	return node_id != size_t(-1) ? getIsTerm().rank1(node_id) : size_t(-1);
 }
 
 template<class NestTrie, class DawgType>
 size_t NestTrieDAWG<NestTrie, DawgType>::
-index_prev(size_t nth) const {
-    assert(nth < this->n_words);
-    size_t node_id = getIsTerm().select1(nth);
-    assert(node_id < getIsTerm().size());
-    assert(getIsTerm()[node_id]);
-    node_id = m_trie->state_prev(node_id, getIsTerm());
-    return node_id != size_t(-1) ? getIsTerm().rank1(node_id) : size_t(-1);
+index_prev(size_t nth) const noexcept {
+	assert(nth < this->n_words);
+	size_t node_id = getIsTerm().select1(nth);
+	assert(node_id < getIsTerm().size());
+	assert(getIsTerm()[node_id]);
+	node_id = m_trie->state_prev(node_id, getIsTerm());
+	return node_id != size_t(-1) ? getIsTerm().rank1(node_id) : size_t(-1);
 }
 
 template<class NestTrie, class DawgType>
 DawgIndexIter NestTrieDAWG<NestTrie, DawgType>::
-dawg_lower_bound(MatchContext& ctx, fstring qry) const {
+dawg_lower_bound(MatchContext& ctx, fstring qry) const noexcept {
 	assert(m_trie->m_is_link.max_rank1() == this->m_zpath_states);
-	THROW_STD(invalid_argument, "Not supported");
+	TERARK_DIE("Not supported");
 /** TODO:
 	if (0 == ctx.root) {
 		assert(0 == ctx.pos);
@@ -360,7 +387,7 @@ dawg_lower_bound(MatchContext& ctx, fstring qry) const {
 
 template<class NestTrie, class DawgType>
 void NestTrieDAWG<NestTrie, DawgType>::
-nth_word(MatchContext& ctx, size_t nth, std::string* word) const {
+nth_word(MatchContext& ctx, size_t nth, std::string* word) const noexcept {
 	assert(m_trie->m_is_link.max_rank1() == this->m_zpath_states);
 	if (terark_likely(0 == ctx.root)) {
 		assert(0 == ctx.pos);
@@ -379,7 +406,7 @@ nth_word(MatchContext& ctx, size_t nth, std::string* word) const {
 
 template<class NestTrie, class DawgType>
 void NestTrieDAWG<NestTrie, DawgType>::
-nth_word(MatchContext& ctx, size_t nth, valvec<byte_t>* word) const {
+nth_word(MatchContext& ctx, size_t nth, valvec<byte_t>* word) const noexcept {
 	assert(m_trie->m_is_link.max_rank1() == this->m_zpath_states);
 	if (terark_likely(0 == ctx.root)) {
 		assert(0 == ctx.pos);
@@ -398,7 +425,7 @@ nth_word(MatchContext& ctx, size_t nth, valvec<byte_t>* word) const {
 
 template<class NestTrie, class DawgType>
 void NestTrieDAWG<NestTrie, DawgType>::
-nth_word(size_t nth, std::string* word) const {
+nth_word(size_t nth, std::string* word) const noexcept {
 	assert(m_trie->m_is_link.max_rank1() == this->m_zpath_states);
 	assert(getIsTerm().max_rank1() == this->n_words);
 	assert(nth < this->n_words);
@@ -410,7 +437,7 @@ nth_word(size_t nth, std::string* word) const {
 
 template<class NestTrie, class DawgType>
 void NestTrieDAWG<NestTrie, DawgType>::
-nth_word(size_t nth, valvec<byte_t>* word) const {
+nth_word(size_t nth, valvec<byte_t>* word) const noexcept {
 	assert(m_trie->m_is_link.max_rank1() == this->m_zpath_states);
 	assert(getIsTerm().max_rank1() == this->n_words);
 	assert(nth < this->n_words);
@@ -424,26 +451,26 @@ nth_word(size_t nth, valvec<byte_t>* word) const {
 template<class NestTrie, class DawgType>
 void NestTrieDAWG<NestTrie, DawgType>::
 get_random_keys_append(SortableStrVec* keys, size_t max_keys) const {
-    assert(nullptr != keys);
-    assert(m_trie->m_is_link.max_rank1() == this->m_zpath_states);
-    assert(getIsTerm().max_rank1() == this->n_words);
-    size_t nWords = this->n_words;
-    size_t seed = keys->size() + keys->str_size() + max_keys;
-    std::mt19937_64 rnd(seed);
-    for(size_t i = 0; i < max_keys; ++i) {
-        size_t k = rnd() % nWords;
-        size_t node_id = getIsTerm().select1(k);
-        assert(node_id < getIsTerm().size());
-        assert(getIsTerm()[node_id]);
-        size_t offset0 = keys->m_strpool.size();
-        m_trie->restore_dawg_string_append(node_id, &keys->m_strpool);
-        size_t offset1 = keys->m_strpool.size();
-        SortableStrVec::SEntry en;
-        en.offset = offset0;
-        en.length = offset1 - offset0;
-        en.seq_id = k; // seq_id is word id
-        keys->m_index.push_back(en);
-    }
+	assert(nullptr != keys);
+	assert(m_trie->m_is_link.max_rank1() == this->m_zpath_states);
+	assert(getIsTerm().max_rank1() == this->n_words);
+	size_t nWords = this->n_words;
+	size_t seed = keys->size() + keys->str_size() + max_keys;
+	std::mt19937_64 rnd(seed);
+	for(size_t i = 0; i < max_keys; ++i) {
+		size_t k = rnd() % nWords;
+		size_t node_id = getIsTerm().select1(k);
+		assert(node_id < getIsTerm().size());
+		assert(getIsTerm()[node_id]);
+		size_t offset0 = keys->m_strpool.size();
+		m_trie->restore_dawg_string_append(node_id, &keys->m_strpool);
+		size_t offset1 = keys->m_strpool.size();
+		SortableStrVec::SEntry en;
+		en.offset = offset0;
+		en.length = offset1 - offset0;
+		en.seq_id = k; // seq_id is word id
+		keys->m_index.push_back(en);
+	}
 }
 
 template<class NestTrie, class DawgType>
@@ -456,43 +483,41 @@ NestTrieDAWG<NestTrie, DawgType>::v_state_to_word_id(size_t state) const {
 template<class NestTrie, class DawgType>
 size_t
 NestTrieDAWG<NestTrie, DawgType>::state_to_dict_rank(size_t state) const {
-    return m_trie->state_to_dict_rank(state, getIsTerm());
+	return m_trie->state_to_dict_rank(state, getIsTerm());
 }
 
 template<class NestTrie, class DawgType>
 size_t
-NestTrieDAWG<NestTrie, DawgType>::dict_rank_to_state(size_t rank) const {
-    return m_trie->dict_rank_to_state(rank, getIsTerm());
+NestTrieDAWG<NestTrie, DawgType>::dict_rank_to_state(size_t rank) const noexcept {
+	return m_trie->dict_rank_to_state(rank, getIsTerm());
 }
 
 template<class NestTrie, class DawgType>
 void
 NestTrieDAWG<NestTrie, DawgType>::finish_load_mmap(const DFA_MmapHeader* base) {
-	if (m_trie) {
-		THROW_STD(invalid_argument, "m_trie is not NULL");
-	}
+	TERARK_VERIFY_EQ(m_trie, nullptr);
 	byte_t* bbase = (byte_t*)base;
 	m_trie = new NestTrie();
 	size_t i = 0;
 	if (!NestTrie::is_link_rs_mixed::value) {
 		i = 1;
 		getIsTerm().risk_mmap_from(bbase + base->blocks[0].offset, base->blocks[0].length);
-		assert(2 == base->num_blocks);
+		TERARK_VERIFY_EQ(base->num_blocks, 2);
 	}
 	else {
-		assert(1 == base->num_blocks);
+		TERARK_VERIFY_EQ(base->num_blocks, 1);
 	}
 	m_trie->load_mmap(bbase + base->blocks[i].offset, base->blocks[i].length);
-    m_trie->init_for_term(getIsTerm());
-    m_trie->m_max_strlen = base->atom_dfa_num;
-    if (m_trie->m_max_strlen == 0) { // always 0 for old NLT File
-        // will over allocate memory for Iterator
-        m_trie->m_max_strlen = (m_trie->m_layer_id.size() + 1) * 256;
-    }
-	assert(getIsTerm().size() == m_trie->total_states());
+	m_trie->init_for_term(getIsTerm());
+	m_trie->m_max_strlen = base->atom_dfa_num;
+	if (m_trie->m_max_strlen == 0) { // always 0 for old NLT File
+		// will over allocate memory for Iterator
+		m_trie->m_max_strlen = (m_trie->m_layer_id_rank.size() + 1) * 256;
+	}
+	TERARK_VERIFY_EQ(getIsTerm().size(), m_trie->total_states());
 	this->n_words = size_t(base->dawg_num_words);
 	this->m_zpNestLevel = m_trie->nest_level();
-	assert(m_trie->m_is_link.max_rank1() == base->zpath_states);
+	TERARK_VERIFY_EQ(m_trie->m_is_link.max_rank1(), base->zpath_states);
 }
 
 template<class NestTrie, class DawgType>
@@ -560,7 +585,7 @@ prepare_save_mmap(DFA_MmapHeader* base, const void** dataPtrs) const {
 	base->blocks[blockIndex].offset = blockOffset;
 	base->blocks[blockIndex].length = trie_mem_size;
 	base->louds_dfa_num_zpath_trie = m_trie->nest_level();
-    base->atom_dfa_num = m_trie->m_max_strlen;
+	base->atom_dfa_num = m_trie->m_max_strlen;
 
 	return need_free_mask;
 }
@@ -579,43 +604,43 @@ template<class NestTrie, class DawgType>
 void
 NestTrieDAWG<NestTrie, DawgType>::
 build_from(SortableStrVec& strVec, const NestLoudsTrieConfig& conf) {
-    build_from_tpl(strVec, conf);
+	build_from_tpl(strVec, conf);
 }
 template<class NestTrie, class DawgType>
 void
 NestTrieDAWG<NestTrie, DawgType>::
 build_from(SortThinStrVec& strVec, const NestLoudsTrieConfig& conf) {
-    build_from_tpl(strVec, conf);
+	build_from_tpl(strVec, conf);
 }
 template<class NestTrie, class DawgType>
 void
 NestTrieDAWG<NestTrie, DawgType>::
 build_from(FixedLenStrVec& strVec, const NestLoudsTrieConfig& conf) {
-    build_from_tpl(strVec, conf);
+	build_from_tpl(strVec, conf);
 }
 template<class NestTrie, class DawgType>
 void
 NestTrieDAWG<NestTrie, DawgType>::
 build_from(VoSortedStrVec& strVec, const NestLoudsTrieConfig& conf) {
-    build_from_tpl(strVec, conf);
+	build_from_tpl(strVec, conf);
 }
 template<class NestTrie, class DawgType>
 void
 NestTrieDAWG<NestTrie, DawgType>::
 build_from(ZoSortedStrVec& strVec, const NestLoudsTrieConfig& conf) {
-    build_from_tpl(strVec, conf);
+	build_from_tpl(strVec, conf);
 }
 template<class NestTrie, class DawgType>
 void
 NestTrieDAWG<NestTrie, DawgType>::
 build_from(DoSortedStrVec& strVec, const NestLoudsTrieConfig& conf) {
-    build_from_tpl(strVec, conf);
+	build_from_tpl(strVec, conf);
 }
 template<class NestTrie, class DawgType>
 void
 NestTrieDAWG<NestTrie, DawgType>::
 build_from(QoSortedStrVec& strVec, const NestLoudsTrieConfig& conf) {
-    build_from_tpl(strVec, conf);
+	build_from_tpl(strVec, conf);
 }
 
 template<class NestTrie, class DawgType>
@@ -634,21 +659,23 @@ build_from_tpl(StrVecType& strVec, const NestLoudsTrieConfig& conf) {
 	size_t strVecSize = strVec.size();
 #endif
 	m_trie = new NestTrie();
-    using namespace std::placeholders;
+	using namespace std::placeholders;
 	auto buildTerm = std::bind(&NestTrieDAWG::build_term_bits, this, _1);
 	m_trie->build_patricia(strVec, buildTerm, conf);
-    m_trie->init_for_term(getIsTerm());
+	m_trie->init_for_term(getIsTerm());
 	this->m_zpath_states = m_trie->num_zpath_states();
 	this->m_total_zpath_len = m_trie->total_zpath_len();
 	this->n_words = getIsTerm().max_rank1();
 	this->m_zpNestLevel = conf.nestLevel;
 	// strVec may have duplicates, so assert <=
 	assert(getIsTerm().max_rank1() <= strVecSize);
+
+	this->m_adfa_total_words_len += conf.commonPrefix.size() * this->n_words;
 }
 
 template<class NestTrie, class DawgType>
 void
-NestTrieDAWG<NestTrie, DawgType>::build_term_bits(const valvec<index_t>& linkVec) {
+NestTrieDAWG<NestTrie, DawgType>::build_term_bits(const valvec<size_t>& linkVec) {
 	auto& termFlag = this->getIsTerm();
 	termFlag.resize_fill(this->m_trie->m_is_link.size(), 0);
 	for(size_t node_id : linkVec) {
@@ -661,7 +688,7 @@ NestTrieDAWG<NestTrie, DawgType>::build_term_bits(const valvec<index_t>& linkVec
 template<class NestTrie, class DawgType>
 void
 NestTrieDAWG<NestTrie, DawgType>::
-build_with_id(SortableStrVec& strVec, valvec<index_t>& idvec, const NestLoudsTrieConfig& conf) {
+build_with_id(SortableStrVec& strVec, valvec<size_t>& idvec, const NestLoudsTrieConfig& conf) {
 	if (conf.nestLevel < 1) {
 		THROW_STD(invalid_argument, "conf.nestLevel=%d", conf.nestLevel);
 	}
@@ -694,14 +721,14 @@ build_with_id(SortableStrVec& strVec, valvec<index_t>& idvec, const NestLoudsTri
 template<class NestTrie, class DawgType>
 ADFA_LexIterator*
 NestTrieDAWG<NestTrie, DawgType>::adfa_make_iter(size_t root) const {
-    assert(NULL != m_trie);
-    return new Iterator(this);
+	assert(NULL != m_trie);
+	return new Iterator(this);
 }
 template<class NestTrie, class DawgType>
 ADFA_LexIterator16*
 NestTrieDAWG<NestTrie, DawgType>::adfa_make_iter16(size_t root) const {
-//    return new Iterator(this);
-    THROW_STD(logic_error, "Not supported");
+//	return new Iterator(this);
+	THROW_STD(logic_error, "Not supported");
 }
 #endif
 

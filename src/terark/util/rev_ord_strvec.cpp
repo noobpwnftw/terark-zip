@@ -4,26 +4,26 @@
 // 2020-06-21 00:16 -- prefetch has no observable improve
 //#define StrVec_EnablePrefetch
 #if defined(StrVec_EnablePrefetch)
-	#define StrVec_prefetch(cond, ptr) do if (cond) _mm_prefetch((const char*)ptr, _MM_HINT_T0); while (0)
+    #define StrVec_prefetch(cond, ptr) do if (cond) _mm_prefetch((const char*)ptr, _MM_HINT_T0); while (0)
 #else
-	#define StrVec_prefetch(cond, ptr)
+    #define StrVec_prefetch(cond, ptr)
 #endif
 namespace terark {
 
 static inline
 bool str_less(const void* xp, size_t xn, const void* yp, size_t yn) {
-	ptrdiff_t n = std::min(xn, yn);
-	int ret = memcmp(xp, yp, n);
-	if (ret)
-		return ret < 0;
-	else
-		return xn < yn;
+    ptrdiff_t n = std::min(xn, yn);
+    int ret = memcmp(xp, yp, n);
+    if (ret)
+        return ret < 0;
+    else
+        return xn < yn;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 FixedRevStrVec::~FixedRevStrVec() {
-	m_strpool.risk_destroy(m_strpool_mem_type);
+    m_strpool.risk_destroy(m_strpool_mem_type);
 }
 
 void FixedRevStrVec::reserve(size_t strNum, size_t maxStrPool) {
@@ -48,7 +48,7 @@ void FixedRevStrVec::swap(FixedRevStrVec& y) {
     std::swap(m_fixlen, y.m_fixlen);
     std::swap(m_size  , y.m_size);
     m_strpool.swap(y.m_strpool);
-	std::swap(m_strpool_mem_type, y.m_strpool_mem_type);
+    std::swap(m_strpool_mem_type, y.m_strpool_mem_type);
 }
 
 void FixedRevStrVec::push_back(fstring str) {
@@ -105,7 +105,7 @@ static int CmpFixRevStr(const void* x, const void* y, void* ctx)
 #endif
 {
     size_t fixlen = (size_t)(ctx);
-    return -memcmp(x, y, fixlen);
+    return memcmp(y, x, fixlen);
 }
 
 void FixedRevStrVec::sort() {
@@ -116,11 +116,23 @@ void FixedRevStrVec::sort() {
 void FixedRevStrVec::sort_raw(void* base, size_t num, size_t fixlen) {
 #ifdef _MSC_VER
     #define QSortCtx qsort_s
+#elif defined(__ANDROID__)
+    static std::mutex mtx;
+    static size_t s_fixlen = 0;
+    auto compar = [](const void* x, const void* y) {
+        return memcmp(y, x, s_fixlen);
+    };
+    auto QSortCtx = [&](void *base, size_t size, size_t nmemb, ...) {
+        mtx.lock();
+        s_fixlen = fixlen; // must not assign on init
+        qsort(base, nmemb, size, compar);
+        mtx.unlock();
+    };
 #elif defined(__APPLE__)
     auto QSortCtx = [](void *base, size_t size, size_t nmemb,
-    		           int (*compar)(void *, const void *, const void *),
-					   void *thunk) {
-		qsort_r(base, nmemb, size, thunk, compar);
+                       int (*compar)(void *, const void *, const void *),
+                       void *thunk) {
+        qsort_r(base, nmemb, size, thunk, compar);
     };
 #else
     #define QSortCtx qsort_r
@@ -172,8 +184,8 @@ size_t FixedRevStrVec::upper_bound_at_pos(size_t lo, size_t hi, size_t pos, byte
     while (lo < hi) {
         size_t mid = (lo + hi) / 2;
         assert(pos < fixlen);
-		StrVec_prefetch(true, pool + fixlen*(imax - (lo+mid)/2));
-		StrVec_prefetch(true, pool + fixlen*(imax - (hi+mid)/2));
+        StrVec_prefetch(true, pool + fixlen*(imax - (lo+mid)/2));
+        StrVec_prefetch(true, pool + fixlen*(imax - (hi+mid)/2));
         if (pool[fixlen * (imax - mid) + pos] <= ch)
             lo = mid + 1;
         else
@@ -184,80 +196,80 @@ size_t FixedRevStrVec::upper_bound_at_pos(size_t lo, size_t hi, size_t pos, byte
 
 terark_flatten
 size_t FixedRevStrVec::lower_bound(size_t lo, size_t hi, fstring key) const {
-	assert(m_fixlen * m_size == m_strpool.size());
-	assert(lo <= hi);
-	assert(hi <= m_size);
-	auto fixlen = m_fixlen;
-	auto data = m_strpool.data();
+    assert(m_fixlen * m_size == m_strpool.size());
+    assert(lo <= hi);
+    assert(hi <= m_size);
+    auto fixlen = m_fixlen;
+    auto data = m_strpool.data();
     auto imax = m_size - 1;
-	while (lo < hi) {
-		size_t mid_idx = (lo + hi) / 2;
-		size_t mid_pos = fixlen * (imax - mid_idx);
-		if (fstring(data + mid_pos, fixlen) < key)
-			lo = mid_idx + 1;
-		else
-			hi = mid_idx;
-	}
-	return lo;
+    while (lo < hi) {
+        size_t mid_idx = (lo + hi) / 2;
+        size_t mid_pos = fixlen * (imax - mid_idx);
+        if (fstring(data + mid_pos, fixlen) < key)
+            lo = mid_idx + 1;
+        else
+            hi = mid_idx;
+    }
+    return lo;
 }
 
 terark_flatten
 size_t FixedRevStrVec::upper_bound(size_t lo, size_t hi, fstring key) const {
-	assert(m_fixlen * m_size == m_strpool.size());
-	assert(lo <= hi);
-	assert(hi <= m_size);
-	auto fixlen = m_fixlen;
-	auto data = m_strpool.data();
+    assert(m_fixlen * m_size == m_strpool.size());
+    assert(lo <= hi);
+    assert(hi <= m_size);
+    auto fixlen = m_fixlen;
+    auto data = m_strpool.data();
     auto imax = m_size - 1;
-	while (lo < hi) {
-		size_t mid_idx = (lo + hi) / 2;
-		size_t mid_pos = fixlen * (imax - mid_idx);
-		if (fstring(data + mid_pos, fixlen) <= key)
-			lo = mid_idx + 1;
-		else
-			hi = mid_idx;
-	}
-	return lo;
+    while (lo < hi) {
+        size_t mid_idx = (lo + hi) / 2;
+        size_t mid_pos = fixlen * (imax - mid_idx);
+        if (fstring(data + mid_pos, fixlen) <= key)
+            lo = mid_idx + 1;
+        else
+            hi = mid_idx;
+    }
+    return lo;
 }
 
 terark_flatten
 static size_t FixedRev_lower_bound_slow(const FixedRevStrVec* sv,
                                      size_t lo, size_t hi, const void* key) {
-	assert(sv->m_fixlen * sv->m_size == sv->m_strpool.size());
-	assert(lo <= hi);
-	assert(hi <= sv->m_size);
-	auto fixlen = sv->m_fixlen;
-	auto data = sv->m_strpool.data();
+    assert(sv->m_fixlen * sv->m_size == sv->m_strpool.size());
+    assert(lo <= hi);
+    assert(hi <= sv->m_size);
+    auto fixlen = sv->m_fixlen;
+    auto data = sv->m_strpool.data();
     auto imax = sv->m_size - 1;
-	while (lo < hi) {
-		size_t mid_idx = (lo + hi) / 2;
-		size_t mid_pos = fixlen * (imax - mid_idx);
-		if (memcmp(data + mid_pos, key, fixlen) < 0)
-			lo = mid_idx + 1;
-		else
-			hi = mid_idx;
-	}
-	return lo;
+    while (lo < hi) {
+        size_t mid_idx = (lo + hi) / 2;
+        size_t mid_pos = fixlen * (imax - mid_idx);
+        if (memcmp(data + mid_pos, key, fixlen) < 0)
+            lo = mid_idx + 1;
+        else
+            hi = mid_idx;
+    }
+    return lo;
 }
 
 terark_flatten
 static size_t FixedRev_upper_bound_slow(const FixedRevStrVec* sv,
                                      size_t lo, size_t hi, const void* key) {
-	assert(sv->m_fixlen * sv->m_size == sv->m_strpool.size());
-	assert(lo <= hi);
-	assert(hi <= sv->m_size);
-	auto fixlen = sv->m_fixlen;
-	auto data = sv->m_strpool.data();
+    assert(sv->m_fixlen * sv->m_size == sv->m_strpool.size());
+    assert(lo <= hi);
+    assert(hi <= sv->m_size);
+    auto fixlen = sv->m_fixlen;
+    auto data = sv->m_strpool.data();
     auto imax = sv->m_size - 1;
-	while (lo < hi) {
-		size_t mid_idx = (lo + hi) / 2;
-		size_t mid_pos = fixlen * (imax - mid_idx);
-		if (memcmp(data + mid_pos, key, fixlen) <= 0)
-			lo = mid_idx + 1;
-		else
-			hi = mid_idx;
-	}
-	return lo;
+    while (lo < hi) {
+        size_t mid_idx = (lo + hi) / 2;
+        size_t mid_pos = fixlen * (imax - mid_idx);
+        if (memcmp(data + mid_pos, key, fixlen) <= 0)
+            lo = mid_idx + 1;
+        else
+            hi = mid_idx;
+    }
+    return lo;
 }
 
 
@@ -266,24 +278,24 @@ terark_flatten
 static size_t FixedRev_lower_bound(const FixedRevStrVec* sv,
                                 size_t lo, size_t hi, const void* key) {
     assert(sizeof(Uint) == sv->m_fixlen);
-	assert(sv->m_fixlen * sv->m_size == sv->m_strpool.size());
-	assert(lo <= hi);
-	assert(hi <= sv->m_size);
-	assert(size_t(sv->m_strpool.data()) % sizeof(Uint) == 0);
-	Uint ukey = unaligned_load<Uint>(key);
-	auto data = (const Uint*)sv->m_strpool.data();
+    assert(sv->m_fixlen * sv->m_size == sv->m_strpool.size());
+    assert(lo <= hi);
+    assert(hi <= sv->m_size);
+    assert(size_t(sv->m_strpool.data()) % sizeof(Uint) == 0);
+    Uint ukey = unaligned_load<Uint>(key);
+    auto data = (const Uint*)sv->m_strpool.data();
     auto imax = sv->m_size - 1;
-	BYTE_SWAP_IF_LITTLE_ENDIAN(ukey);
-	while (lo < hi) {
-		size_t mid_idx = (lo + hi) / 2;
-		Uint   mid_val = data[imax - mid_idx];
-		BYTE_SWAP_IF_LITTLE_ENDIAN(mid_val);
-		if (mid_val < ukey)
-			lo = mid_idx + 1;
-		else
-			hi = mid_idx;
-	}
-	return lo;
+    BYTE_SWAP_IF_LITTLE_ENDIAN(ukey);
+    while (lo < hi) {
+        size_t mid_idx = (lo + hi) / 2;
+        Uint   mid_val = data[imax - mid_idx];
+        BYTE_SWAP_IF_LITTLE_ENDIAN(mid_val);
+        if (mid_val < ukey)
+            lo = mid_idx + 1;
+        else
+            hi = mid_idx;
+    }
+    return lo;
 }
 
 template<class Uint>
@@ -291,24 +303,24 @@ terark_flatten
 static size_t FixedRev_upper_bound(const FixedRevStrVec* sv,
                                 size_t lo, size_t hi, const void* key) {
   assert(sizeof(Uint) == sv->m_fixlen);
-	assert(sv->m_fixlen * sv->m_size == sv->m_strpool.size());
-	assert(lo <= hi);
-	assert(hi <= sv->m_size);
-	assert(size_t(sv->m_strpool.data()) % sizeof(Uint) == 0);
-	Uint ukey = unaligned_load<Uint>(key);
-	auto data = (const Uint*)sv->m_strpool.data();
+    assert(sv->m_fixlen * sv->m_size == sv->m_strpool.size());
+    assert(lo <= hi);
+    assert(hi <= sv->m_size);
+    assert(size_t(sv->m_strpool.data()) % sizeof(Uint) == 0);
+    Uint ukey = unaligned_load<Uint>(key);
+    auto data = (const Uint*)sv->m_strpool.data();
     auto imax = sv->m_size - 1;
-	BYTE_SWAP_IF_LITTLE_ENDIAN(ukey);
-	while (lo < hi) {
-		size_t mid_idx = (lo + hi) / 2;
-		Uint   mid_val = data[imax - mid_idx];
-		BYTE_SWAP_IF_LITTLE_ENDIAN(mid_val);
-		if (mid_val <= ukey)
-			lo = mid_idx + 1;
-		else
-			hi = mid_idx;
-	}
-	return lo;
+    BYTE_SWAP_IF_LITTLE_ENDIAN(ukey);
+    while (lo < hi) {
+        size_t mid_idx = (lo + hi) / 2;
+        Uint   mid_val = data[imax - mid_idx];
+        BYTE_SWAP_IF_LITTLE_ENDIAN(mid_val);
+        if (mid_val <= ukey)
+            lo = mid_idx + 1;
+        else
+            hi = mid_idx;
+    }
+    return lo;
 }
 
 FixedRevStrVec::FixedRevStrVec(size_t fixlen) {
@@ -342,12 +354,12 @@ void FixedRevStrVec::optimize_func() {
 ///////////////////////////////////////////////////////////////////////////////
 
 RevOrdStrVec::RevOrdStrVec() {
-	m_offsets_mem_type = MemType::Malloc;
-	m_strpool_mem_type = MemType::Malloc;
+    m_offsets_mem_type = MemType::Malloc;
+    m_strpool_mem_type = MemType::Malloc;
 }
 RevOrdStrVec::~RevOrdStrVec() {
-	m_offsets.risk_destroy(m_offsets_mem_type);
-	m_strpool.risk_destroy(m_strpool_mem_type);
+    m_offsets.risk_destroy(m_offsets_mem_type);
+    m_strpool.risk_destroy(m_strpool_mem_type);
 }
 
 void RevOrdStrVec::reserve(size_t strNum, size_t maxStrPool) {
@@ -370,8 +382,8 @@ void RevOrdStrVec::shrink_to_fit() {
 void RevOrdStrVec::swap(RevOrdStrVec& y) {
     m_offsets.swap(y.m_offsets);
     m_strpool.swap(y.m_strpool);
-	std::swap(m_offsets_mem_type, y.m_offsets_mem_type);
-	std::swap(m_strpool_mem_type, y.m_strpool_mem_type);
+    std::swap(m_offsets_mem_type, y.m_offsets_mem_type);
+    std::swap(m_strpool_mem_type, y.m_strpool_mem_type);
 }
 
 void RevOrdStrVec::push_back(fstring str) {
@@ -470,7 +482,7 @@ size_t RevOrdStrVec::upper_bound_at_pos(size_t lo, size_t hi, size_t pos, byte_t
     const byte_t* data = m_offsets.data();
     const size_t  bits = m_offsets.uintbits();
     const size_t  mask = m_offsets.uintmask();
-	const size_t  imax = m_offsets.size() - 2;
+    const size_t  imax = m_offsets.size() - 2;
     const byte_t* pool = m_strpool.data();
 #if !defined(NDEBUG)
     const byte_t kh = pool[UintVecMin0::fast_get(data, bits, mask, imax - lo) + pos];
@@ -494,52 +506,52 @@ size_t RevOrdStrVec::upper_bound_at_pos(size_t lo, size_t hi, size_t pos, byte_t
 
 terark_flatten
 size_t RevOrdStrVec::lower_bound(size_t start, size_t end, fstring key) const {
-	assert(start <= end);
-	assert(end <= m_offsets.size()-1);
-	const auto pool = m_strpool.data();
-	const auto data = m_offsets.data();
-	const auto imax = m_offsets.size() - 2;
-	const auto bits = m_offsets.uintbits();
-	const auto mask = m_offsets.uintmask();
-	size_t lo = start, hi = end;
-	while (lo < hi) {
-		size_t mid_idx = (lo + hi) / 2;
-		size_t mid_rev = imax - mid_idx;
-		size_t mid_beg = UintVecMin0::fast_get(data, bits, mask, mid_rev);
-		size_t mid_end = UintVecMin0::fast_get(data, bits, mask, mid_rev+1);
-		size_t mid_len = mid_end - mid_beg;
-		TERARK_ASSERT_LE(mid_beg, mid_end);
-		if (str_less(pool + mid_beg, mid_len, key.p, key.n))
-			lo = mid_idx + 1;
-		else
-			hi = mid_idx;
-	}
-	return lo;
+    assert(start <= end);
+    assert(end <= m_offsets.size()-1);
+    const auto pool = m_strpool.data();
+    const auto data = m_offsets.data();
+    const auto imax = m_offsets.size() - 2;
+    const auto bits = m_offsets.uintbits();
+    const auto mask = m_offsets.uintmask();
+    size_t lo = start, hi = end;
+    while (lo < hi) {
+        size_t mid_idx = (lo + hi) / 2;
+        size_t mid_rev = imax - mid_idx;
+        size_t mid_beg = UintVecMin0::fast_get(data, bits, mask, mid_rev);
+        size_t mid_end = UintVecMin0::fast_get(data, bits, mask, mid_rev+1);
+        size_t mid_len = mid_end - mid_beg;
+        TERARK_ASSERT_LE(mid_beg, mid_end);
+        if (str_less(pool + mid_beg, mid_len, key.p, key.n))
+            lo = mid_idx + 1;
+        else
+            hi = mid_idx;
+    }
+    return lo;
 }
 
 terark_flatten
 size_t RevOrdStrVec::upper_bound(size_t start, size_t end, fstring key) const {
-	assert(start <= end);
-	assert(end <= m_offsets.size()-1);
-	const auto pool = m_strpool.data();
-	const auto data = m_offsets.data();
-	const auto imax = m_offsets.size() - 2;
-	const auto bits = m_offsets.uintbits();
-	const auto mask = m_offsets.uintmask();
-	size_t lo = start, hi = end;
-	while (lo < hi) {
-		size_t mid_idx = (lo + hi) / 2;
-		size_t mid_rev = imax - mid_idx;
-		size_t mid_beg = UintVecMin0::fast_get(data, bits, mask, mid_rev);
-		size_t mid_end = UintVecMin0::fast_get(data, bits, mask, mid_rev+1);
-		size_t mid_len = mid_end - mid_beg;
-		TERARK_ASSERT_LE(mid_beg, mid_end);
-		if (!str_less(key.p, key.n, pool + mid_beg, mid_len))
-			lo = mid_idx + 1;
-		else
-			hi = mid_idx;
-	}
-	return lo;
+    assert(start <= end);
+    assert(end <= m_offsets.size()-1);
+    const auto pool = m_strpool.data();
+    const auto data = m_offsets.data();
+    const auto imax = m_offsets.size() - 2;
+    const auto bits = m_offsets.uintbits();
+    const auto mask = m_offsets.uintmask();
+    size_t lo = start, hi = end;
+    while (lo < hi) {
+        size_t mid_idx = (lo + hi) / 2;
+        size_t mid_rev = imax - mid_idx;
+        size_t mid_beg = UintVecMin0::fast_get(data, bits, mask, mid_rev);
+        size_t mid_end = UintVecMin0::fast_get(data, bits, mask, mid_rev+1);
+        size_t mid_len = mid_end - mid_beg;
+        TERARK_ASSERT_LE(mid_beg, mid_end);
+        if (!str_less(key.p, key.n, pool + mid_beg, mid_len))
+            lo = mid_idx + 1;
+        else
+            hi = mid_idx;
+    }
+    return lo;
 }
 
 size_t RevOrdStrVec::max_strlen() const {
@@ -562,16 +574,16 @@ size_t RevOrdStrVec::max_strlen() const {
 
 template<class UintXX>
 RevOrdStrVecUintTpl<UintXX>::RevOrdStrVecUintTpl(size_t delim_len) {
-	m_offsets.push_back(0);
-	m_delim_len = delim_len;
-	m_offsets_mem_type = MemType::Malloc;
-	m_strpool_mem_type = MemType::Malloc;
+    m_offsets.push_back(0);
+    m_delim_len = delim_len;
+    m_offsets_mem_type = MemType::Malloc;
+    m_strpool_mem_type = MemType::Malloc;
 }
 
 template<class UintXX>
 RevOrdStrVecUintTpl<UintXX>::~RevOrdStrVecUintTpl() {
-	m_offsets.risk_destroy(m_offsets_mem_type);
-	m_strpool.risk_destroy(m_strpool_mem_type);
+    m_offsets.risk_destroy(m_offsets_mem_type);
+    m_strpool.risk_destroy(m_strpool_mem_type);
 }
 
 template<class UintXX>
@@ -590,21 +602,21 @@ template<class UintXX>
 void RevOrdStrVecUintTpl<UintXX>::swap(RevOrdStrVecUintTpl& y) {
     m_offsets.swap(y.m_offsets);
     m_strpool.swap(y.m_strpool);
-	std::swap(m_delim_len, y.m_delim_len);
-	std::swap(m_offsets_mem_type, y.m_offsets_mem_type);
-	std::swap(m_strpool_mem_type, y.m_strpool_mem_type);
+    std::swap(m_delim_len, y.m_delim_len);
+    std::swap(m_offsets_mem_type, y.m_offsets_mem_type);
+    std::swap(m_strpool_mem_type, y.m_strpool_mem_type);
 }
 
 template<class UintXX>
 void RevOrdStrVecUintTpl<UintXX>::push_back(fstring str) {
     m_strpool.append(str.data(), str.size());
     m_offsets.push_back(m_strpool.size());
-	m_offsets.push_n(m_delim_len, '\0');
+    m_offsets.push_n(m_delim_len, '\0');
 }
 
 template<class UintXX>
 void RevOrdStrVecUintTpl<UintXX>::pop_back() {
-	size_t osize = m_offsets.size();
+    size_t osize = m_offsets.size();
     assert(osize > 2);
     m_strpool.risk_set_size(m_offsets[osize-2]);
     m_offsets.risk_set_size(osize-1);
@@ -613,7 +625,7 @@ void RevOrdStrVecUintTpl<UintXX>::pop_back() {
 template<class UintXX>
 void RevOrdStrVecUintTpl<UintXX>::back_grow_no_init(size_t nGrow) {
     assert(m_offsets.size() >= 2);
-	size_t slen = m_strpool.size() + nGrow;
+    size_t slen = m_strpool.size() + nGrow;
     m_strpool.resize_no_init(slen);
     m_offsets.back() = slen;
 }
@@ -680,8 +692,8 @@ size_t RevOrdStrVecUintTpl<UintXX>::upper_bound_at_pos(size_t lo, size_t hi, siz
         size_t mid_idx = (lo + hi) / 2;
         size_t mid_rev = imax - mid_idx;
         TERARK_ASSERT_LT(pos, this->nth_size(mid_idx));
-		StrVec_prefetch(true, data + (lo + mid_rev)/2);
-		StrVec_prefetch(true, data + (hi + mid_rev)/2);
+        StrVec_prefetch(true, data + (lo + mid_rev)/2);
+        StrVec_prefetch(true, data + (hi + mid_rev)/2);
         size_t offset = data[mid_rev];
         if (pool[offset + pos] <= ch)
             lo = mid_idx + 1;
@@ -710,7 +722,7 @@ size_t RevOrdStrVecUintTpl<UintXX>::upper_bound(size_t start, size_t end, fstrin
 template<class UintXX>
 terark_flatten
 size_t RevOrdStrVecUintTpl<UintXX>::max_strlen() const {
-	const auto offsets = m_offsets.data();
+    const auto offsets = m_offsets.data();
     const auto size = m_offsets.size();
     size_t maxlen = 0;
     for(size_t i = 1; i < size; ++i) {
@@ -728,4 +740,3 @@ template class RevOrdStrVecUintTpl<uint64_t>;
 
 
 } // namespace terark
-

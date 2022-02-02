@@ -1,15 +1,3 @@
-//#define USE_SUFFIX_ARRAY_TRIE
-
-#if defined(USE_SUFFIX_ARRAY_TRIE)
-#include "suffix_array_trie.hpp"
-#include <divsufsort.h>
-#else
-namespace terark {
-#define SuffixTrieCacheDFA DummySuffixTrieCacheDFA
-	class DummySuffixTrieCacheDFA {};
-}
-#endif
-
 #include "nest_louds_trie_inline.hpp"
 #include "dfa_mmap_header.hpp"
 #include "tmplinst.hpp"
@@ -74,48 +62,48 @@ NestLoudsTrieConfig::~NestLoudsTrieConfig() {
 }
 
 void NestLoudsTrieConfig::initFromEnv() {
-    if (const char* env = getenv("NestLoudsTrie_debugLevel")) {
-        debugLevel = (byte)atoi(env);
-    }
-    if (const char* env = getenv("NestLoudsTrie_nestLevel")) {
-        nestLevel = strtol(env, NULL, 10);
-    }
-    if (const char* env = getenv("NestLoudsTrie_nestScale")) {
-        nestScale = strtol(env, NULL, 10);
-    }
-    if (const char* env = getenv("NestLoudsTrie_minFragLen")) {
-        minFragLen = strtol(env, NULL, 10);
-    }
-    if (const char* env = getenv("NestLoudsTrie_maxFragLen")) {
-        maxFragLen = strtol(env, NULL, 10);
-    }
-    if (const char* env = getenv("NestLoudsTrie_saFragMinFreq")) {
-        saFragMinFreq = strtol(env, NULL, 10);
-    }
-    if (const char* env = getenv("NestLoudsTrie_bzMinLen")) {
-        bzMinLen = strtol(env, NULL, 10);
-    }
-    if (minFragLen > 256) {
-        fprintf(stderr, "NestLoudsTrie_minFragLen=%d is too large, set to 256\n", minFragLen);
-        minFragLen = 256;
-    }
-    if (maxFragLen < 16) {
-        fprintf(stderr, "NestLoudsTrie_maxFragLen=%d is too small, set to 16\n", maxFragLen);
-        maxFragLen = 16;
-    }
-    if (const char* env = getenv("NestLoudsTrie_bestDelim")) {
-    	fprintf(stderr, "NestLoudsTrie_bestDelim=%s\n", env);
+	if (const char* env = getenv("NestLoudsTrie_debugLevel")) {
+		debugLevel = (byte)atoi(env);
+	}
+	if (const char* env = getenv("NestLoudsTrie_nestLevel")) {
+		nestLevel = strtol(env, NULL, 10);
+	}
+	if (const char* env = getenv("NestLoudsTrie_nestScale")) {
+		nestScale = strtol(env, NULL, 10);
+	}
+	if (const char* env = getenv("NestLoudsTrie_minFragLen")) {
+		minFragLen = strtol(env, NULL, 10);
+	}
+	if (const char* env = getenv("NestLoudsTrie_maxFragLen")) {
+		maxFragLen = strtol(env, NULL, 10);
+	}
+	if (const char* env = getenv("NestLoudsTrie_saFragMinFreq")) {
+		saFragMinFreq = strtol(env, NULL, 10);
+	}
+	if (const char* env = getenv("NestLoudsTrie_bzMinLen")) {
+		bzMinLen = strtol(env, NULL, 10);
+	}
+	if (minFragLen > 256) {
+		fprintf(stderr, "NestLoudsTrie_minFragLen=%d is too large, set to 256\n", minFragLen);
+		minFragLen = 256;
+	}
+	if (maxFragLen < 16) {
+		fprintf(stderr, "NestLoudsTrie_maxFragLen=%d is too small, set to 16\n", maxFragLen);
+		maxFragLen = 16;
+	}
+	if (const char* env = getenv("NestLoudsTrie_bestDelim")) {
+		fprintf(stderr, "NestLoudsTrie_bestDelim=%s\n", env);
 		setBestDelims(env);
-    }
-    if (const char* env = getenv("NestLoudsTrie_isInputSorted")) {
-    	isInputSorted = atoi(env) ? true : false;
-    }
-    if (const char* env = getenv("NestLoudsTrie_isSearchDelimForward")) {
-    	flags.set(optSearchDelimForward, atoi(env) ? 1 : 0);
-    }
-    if (const char* env = getenv("NestLoudsTrie_optCutFragOnPunct")) {
-    	flags.set(optCutFragOnPunct, atoi(env) ? 1 : 0);
-    }
+	}
+	if (const char* env = getenv("NestLoudsTrie_isInputSorted")) {
+		isInputSorted = atoi(env) ? true : false;
+	}
+	if (const char* env = getenv("NestLoudsTrie_isSearchDelimForward")) {
+		flags.set(optSearchDelimForward, atoi(env) ? 1 : 0);
+	}
+	if (const char* env = getenv("NestLoudsTrie_optCutFragOnPunct")) {
+		flags.set(optCutFragOnPunct, atoi(env) ? 1 : 0);
+	}
 	if (const char* env = getenv("NestLoudsTrie_minLinkStrLen")) {
 		minLinkStrLen = atoi(env);
 	}
@@ -150,33 +138,33 @@ void NestLoudsTrieConfig::initFromEnv() {
 }
 
 void NestLoudsTrieConfig::setBestDelims(const char* delims) {
-    size_t len = strlen(delims);
-    std::string bestDelim;
-    for (size_t i = 0; i < len; ) {
-    	if ('\\' == delims[i]) {
-    		byte_t ch;
-    		switch (delims[++i]) {
-    		case '0': ch = '\0'; ++i; break;
-    		case 'n': ch = '\n'; ++i; break;
-    		case 'r': ch = '\r'; ++i; break;
-    		case 't': ch = '\t'; ++i; break;
-    		case 'v': ch = '\v'; ++i; break;
-    		case '\\':ch = '\\'; ++i; break;
-    		case 'x':
-    			ch = hexlcast(delims+i+1, 2);
-    			i += 3;
-    			break;
-    		default:
-    			ch = delims[i];
-    			break;
-    		}
-    		bestDelim.push_back(ch);
-    	} else {
-    		bestDelim.push_back(delims[i++]);
-    	}
-    }
+	size_t len = strlen(delims);
+	std::string bestDelim;
+	for (size_t i = 0; i < len; ) {
+		if ('\\' == delims[i]) {
+			byte_t ch;
+			switch (delims[++i]) {
+			case '0': ch = '\0'; ++i; break;
+			case 'n': ch = '\n'; ++i; break;
+			case 'r': ch = '\r'; ++i; break;
+			case 't': ch = '\t'; ++i; break;
+			case 'v': ch = '\v'; ++i; break;
+			case '\\':ch = '\\'; ++i; break;
+			case 'x':
+				ch = hexlcast(delims+i+1, 2);
+				i += 3;
+				break;
+			default:
+				ch = delims[i++];
+				break;
+			}
+			bestDelim.push_back(ch);
+		} else {
+			bestDelim.push_back(delims[i++]);
+		}
+	}
 //	bestDelimBits.fill_all(0);
-    for (byte_t ch : bestDelim) bestDelimBits.set1(ch);
+	for (byte_t ch : bestDelim) bestDelimBits.set1(ch);
 }
 
 static int getRealTmpLevel(int tmpLevel, size_t strnum, size_t poolsize) {
@@ -205,10 +193,10 @@ static int getRealTmpLevel(const NestLoudsTrieConfig& conf, size_t strnum, size_
 }
 
 static int getRealMinLinkStrLen(const NestLoudsTrieConfig& conf) {
-    if (conf.useMixedCoreLink)
-        return std::max<int>(conf.minLinkStrLen, 2);
-    else
-        return conf.minLinkStrLen;
+	if (conf.useMixedCoreLink)
+		return std::max<int>(conf.minLinkStrLen, 2);
+	else
+		return conf.minLinkStrLen;
 }
 /////////////////////////////////////////////////////////////////////////////
 
@@ -252,7 +240,7 @@ ComputeBestZipLen(const SortableStrVec& strVec, size_t minZipLen, uint16_t* lenA
 	const size_t  saLen = strVec.str_size();
 	profiling pf;
 	long long t0 = pf.now();
-	if (divsufsort(str, sa, saLen) != 0) {
+	if (divsufsort(str, sa, saLen, 0) != 0) {
 		throw std::bad_alloc();
 	}
 	long long t1 = pf.now();
@@ -310,35 +298,35 @@ ComputeBestZipLen(const SortableStrVec& strVec, size_t minZipLen, uint16_t* lenA
 /////////////////////////////////////////////////////////////////////////////
 template<class T>
 class fixed_vec {
-    T*     m_beg;
-    T*     m_end;
-    TERARK_IF_DEBUG(T* m_limit,);
+	T*     m_beg;
+	T*     m_end;
+	TERARK_IF_DEBUG(T* m_limit,);
 public:
-    typedef T value_type;
-    fixed_vec(T* q, size_t cap) : m_beg(q), m_end(q) {
-        TERARK_IF_DEBUG(m_limit = q + cap,);
-    }
-    void push_back(const T x) {
-        assert(m_end < m_limit);
-        T* endp = m_end;
-        *endp = x;
-        m_end = endp + 1;
-    }
-    void append(const T* arr, size_t len) {
-        assert(m_end + len <= m_limit);
-        assert(len > 0);
-        T* endp = m_end;
-    #if 0 // len is large
-        memcpy(endp, arr, len);
-        m_end = endp + len;
-    #else // len is small, this is true
-        do *endp++ = *arr++, len--; while (len);
-        m_end = endp;
-    #endif
-    }
-    size_t size() const { return m_end - m_beg; }
-    T* begin() { return m_beg; }
-    T* end  () { return m_end; }
+	typedef T value_type;
+	fixed_vec(T* q, size_t cap) : m_beg(q), m_end(q) {
+		TERARK_IF_DEBUG(m_limit = q + cap,);
+	}
+	void push_back(const T x) {
+		assert(m_end < m_limit);
+		T* endp = m_end;
+		*endp = x;
+		m_end = endp + 1;
+	}
+	void append(const T* arr, size_t len) {
+		assert(m_end + len <= m_limit);
+		assert(len > 0);
+		T* endp = m_end;
+	#if 0 // len is large
+		memcpy(endp, arr, len);
+		m_end = endp + len;
+	#else // len is small, this is true
+		do *endp++ = *arr++, len--; while (len);
+		m_end = endp;
+	#endif
+	}
+	size_t size() const { return m_end - m_beg; }
+	T* begin() { return m_beg; }
+	T* end  () { return m_end; }
 };
 /////////////////////////////////////////////////////////////////////////////
 
@@ -355,7 +343,7 @@ NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::NestLoudsTrieTpl() {
 	m_total_zpath_len = 0;
 	m_max_layer_id = 0;
 	m_max_layer_size = 0;
-    m_max_strlen = 0;
+	m_max_strlen = 0;
 }
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
@@ -384,7 +372,7 @@ NestLoudsTrieTpl(const NestLoudsTrieTpl& y)
 	m_total_zpath_len = y.m_total_zpath_len;
 	m_max_layer_id = y.m_max_layer_id;
 	m_max_layer_size = y.m_max_layer_size;
-    m_max_strlen = y.m_max_strlen;
+	m_max_strlen = y.m_max_strlen;
 }
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
@@ -402,7 +390,7 @@ operator=(const NestLoudsTrieTpl& y) {
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-risk_release_ownership() {
+risk_release_ownership() noexcept {
 	// this call also reset NestLoudsTrie to constructed stats
 	m_louds.risk_release_ownership();
 	m_is_link.risk_release_ownership();
@@ -415,12 +403,11 @@ risk_release_ownership() {
 	m_core_min_len = 0;
 	m_core_max_link_val = 0;
 	m_total_zpath_len = 0;
-	m_layer_id.clear();
-	m_layer_rank.clear();
+	m_layer_id_rank.clear();
 	m_layer_ref.clear();
 	m_max_layer_id = 0;
 	m_max_layer_size = 0;
-    m_max_strlen = 0;
+	m_max_strlen = 0;
 	if (m_next_trie)
 		m_next_trie->risk_release_ownership();
 }
@@ -437,7 +424,7 @@ NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-swap(NestLoudsTrieTpl& y) {
+swap(NestLoudsTrieTpl& y) noexcept {
 	m_louds.swap(y.m_louds);
 	m_is_link.swap(y.m_is_link);
 	m_next_link.swap(y.m_next_link);
@@ -450,8 +437,7 @@ swap(NestLoudsTrieTpl& y) {
 	std::swap(m_core_max_link_val, y.m_core_max_link_val);
 	std::swap(m_total_zpath_len, y.m_total_zpath_len);
 	std::swap(m_next_trie, y.m_next_trie);
-	m_layer_id.swap(y.m_layer_id);
-	m_layer_rank.swap(y.m_layer_rank);
+	m_layer_id_rank.swap(y.m_layer_id_rank);
 	m_layer_ref.swap(y.m_layer_ref);
 	std::swap(m_max_layer_id, y.m_max_layer_id);
 	std::swap(m_max_layer_size, y.m_max_layer_size);
@@ -460,7 +446,7 @@ swap(NestLoudsTrieTpl& y) {
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
 size_t
-NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::mem_size() const {
+NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::mem_size() const noexcept {
 	return m_louds.mem_size()
 		 + m_is_link.mem_size()
 		 + m_next_link.mem_size()
@@ -471,7 +457,7 @@ NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::mem_size() const {
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
 size_t
-NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::nest_level() const {
+NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::nest_level() const noexcept {
 	size_t num = 1;
 	for (auto trie = m_next_trie; trie; trie = trie->m_next_trie) {
 		num++;
@@ -481,7 +467,7 @@ NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::nest_level() const {
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
 size_t
-NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::core_mem_size() const {
+NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::core_mem_size() const noexcept {
 	auto trie = m_next_trie;
 	for (; trie; trie = trie->m_next_trie) {
 		if (trie->m_core_size)
@@ -493,7 +479,7 @@ NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::core_mem_size() const {
 template<class RankSelect, class RankSelect2, bool FastLabel>
 size_t
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-get_parent(size_t child) const {
+get_parent(size_t child) const noexcept {
 	assert(child > 0); // 0 is root
 	assert(child < total_states());
 	return m_louds.select1(child) - child - 1;
@@ -503,7 +489,7 @@ get_parent(size_t child) const {
 template<class RankSelect, class RankSelect2, bool FastLabel>
 fstring
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-get_core_str(size_t node_id) const {
+get_core_str(size_t node_id) const noexcept {
 	assert(node_id > 0);
 	assert(node_id < m_is_link.size());
 	assert(NULL != m_core_data);
@@ -518,37 +504,37 @@ get_core_str(size_t node_id) const {
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-        restore_string_append(size_t node_id, valvec<byte_t>* str) const {
+restore_string_append(size_t node_id, valvec<byte_t>* str) const noexcept {
 	tpl_restore_string_append(node_id, str);
 }
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-        restore_string_append(size_t node_id, std::string* str) const {
+restore_string_append(size_t node_id, std::string* str) const noexcept {
 	tpl_restore_string_append(node_id, str);
 }
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-        restore_dawg_string_append(size_t node_id, valvec<byte_t>* str) const {
+restore_dawg_string_append(size_t node_id, valvec<byte_t>* str) const noexcept {
 	tpl_restore_dawg_string_append(node_id, str);
 }
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-        restore_dawg_string_append(size_t node_id, std::string* str) const {
+restore_dawg_string_append(size_t node_id, std::string* str) const noexcept {
 	tpl_restore_dawg_string_append(node_id, str);
 }
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-restore_string(size_t node_id, valvec<byte_t>* str) const {
+restore_string(size_t node_id, valvec<byte_t>* str) const noexcept {
 	str->erase_all();
 	restore_string_append(node_id, str);
 }
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-restore_string(size_t node_id, std::string* str) const {
+restore_string(size_t node_id, std::string* str) const noexcept {
 	str->resize(0);
 	restore_string_append(node_id, str);
 }
@@ -557,7 +543,7 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 template<class StrBuf>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-tpl_restore_string_append(size_t node_id, StrBuf* str) const {
+tpl_restore_string_append(size_t node_id, StrBuf* str) const noexcept {
 	assert(NULL != str);
 	assert(node_id < m_is_link.size());
 	str->reserve(64);
@@ -567,14 +553,14 @@ tpl_restore_string_append(size_t node_id, StrBuf* str) const {
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-restore_dawg_string(size_t node_id, valvec<byte_t>* str) const {
+restore_dawg_string(size_t node_id, valvec<byte_t>* str) const noexcept {
 	str->erase_all();
 	tpl_restore_dawg_string_append(node_id, str);
 }
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-restore_dawg_string(size_t node_id, std::string* str) const {
+restore_dawg_string(size_t node_id, std::string* str) const noexcept {
 	str->resize(0);
 	tpl_restore_dawg_string_append(node_id, str);
 }
@@ -582,11 +568,11 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 template<class StrBuf>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-tpl_restore_dawg_string_append(size_t node_id, StrBuf* str) const {
-    assert(NULL != str);
-    assert(node_id < m_is_link.size());
-    str->reserve(64);
-    tpl_restore_string_loop_ex(node_id, str, true);
+tpl_restore_dawg_string_append(size_t node_id, StrBuf* str) const noexcept {
+	assert(NULL != str);
+	assert(node_id < m_is_link.size());
+	str->reserve(64);
+	tpl_restore_string_loop_ex(node_id, str, true);
 }
 
 ///@{
@@ -594,196 +580,196 @@ tpl_restore_dawg_string_append(size_t node_id, StrBuf* str) const {
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-restore_next_string(size_t node_id, valvec<byte_t>* str) const {
+restore_next_string(size_t node_id, valvec<byte_t>* str) const noexcept {
 	tpl_restore_next_string(node_id, str);
 }
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-restore_next_string(size_t node_id, std::string* str) const {
+restore_next_string(size_t node_id, std::string* str) const noexcept {
 	tpl_restore_next_string(node_id, str);
 }
 template<class RankSelect, class RankSelect2, bool FastLabel>
 template<class StrBuf>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-tpl_restore_next_string(size_t node_id, StrBuf* str) const {
+tpl_restore_next_string(size_t node_id, StrBuf* str) const noexcept {
 	assert(NULL != str);
 	assert(node_id > 0);
 	assert(node_id < m_is_link.size());
 	str->resize(0);
 	str->reserve(64);
-    uint64_t linkVal = this->get_link_val(node_id);
-    typedef typename StrBuf::value_type char_type;
-    BOOST_STATIC_ASSERT(sizeof(char_type) == 1);
-    auto coreData = (const char_type*)m_core_data;
-    if (linkVal < m_core_max_link_val) {
-        size_t length = size_t(linkVal &  m_core_len_mask) + m_core_min_len;
-        size_t offset = size_t(linkVal >> m_core_len_bits);
-        assert(offset < m_core_size);
-        assert(offset + length <= m_core_size);
-        str->append((const char_type*)coreData + offset, length);
-    }
-    else {
-        assert(NULL != m_next_trie);
-        linkVal -= m_core_max_link_val;
-        m_next_trie->restore_string_loop(size_t(linkVal), str);
-    }
+	uint64_t linkVal = this->get_link_val(node_id);
+	typedef typename StrBuf::value_type char_type;
+	BOOST_STATIC_ASSERT(sizeof(char_type) == 1);
+	auto coreData = (const char_type*)m_core_data;
+	if (linkVal < m_core_max_link_val) {
+		size_t length = size_t(linkVal &  m_core_len_mask) + m_core_min_len;
+		size_t offset = size_t(linkVal >> m_core_len_bits);
+		assert(offset < m_core_size);
+		assert(offset + length <= m_core_size);
+		str->append((const char_type*)coreData + offset, length);
+	}
+	else {
+		assert(NULL != m_next_trie);
+		linkVal -= m_core_max_link_val;
+		m_next_trie->restore_string_loop(size_t(linkVal), str);
+	}
 }
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
 fstring
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-get_zpath_data(size_t node_id, MatchContext* ctx) const {
-    assert(NULL != ctx);
-    assert(node_id > 0);
-    assert(node_id < m_is_link.size());
-    assert(m_is_link[node_id]);
-    uint64_t linkVal = get_link_val(node_id);
-    if (linkVal < m_core_max_link_val) {
-        assert(NULL != m_core_data);
-        size_t length = size_t(linkVal &  m_core_len_mask) + m_core_min_len;
-        size_t offset = size_t(linkVal >> m_core_len_bits);
-        assert(offset < m_core_size);
-        assert(offset + length <= m_core_size);
-        if (FastLabel)
-            return fstring(m_core_data + offset, length);
-        else
-            return fstring(m_core_data + offset + 1, length - 1);
-    }
-    else {
-        assert(NULL != m_next_trie);
-        size_t nest_id = size_t(linkVal - m_core_max_link_val);
-        ctx->zbuf.reserve(256);
-        fixed_vec<byte_t> buf(ctx->zbuf.data(), 256);
-        m_next_trie->tpl_restore_string_loop(nest_id, &buf);
-        if (FastLabel)
-            return fstring(buf.begin(), buf.size());
-        else
-            return fstring(buf.begin() + 1, buf.size() - 1);
-    }
+get_zpath_data(size_t node_id, MatchContext* ctx) const noexcept {
+	assert(NULL != ctx);
+	assert(node_id > 0);
+	assert(node_id < m_is_link.size());
+	assert(m_is_link[node_id]);
+	uint64_t linkVal = get_link_val(node_id);
+	if (linkVal < m_core_max_link_val) {
+		assert(NULL != m_core_data);
+		size_t length = size_t(linkVal &  m_core_len_mask) + m_core_min_len;
+		size_t offset = size_t(linkVal >> m_core_len_bits);
+		assert(offset < m_core_size);
+		assert(offset + length <= m_core_size);
+		if (FastLabel)
+			return fstring(m_core_data + offset, length);
+		else
+			return fstring(m_core_data + offset + 1, length - 1);
+	}
+	else {
+		assert(NULL != m_next_trie);
+		size_t nest_id = size_t(linkVal - m_core_max_link_val);
+		ctx->zbuf.reserve(256);
+		fixed_vec<byte_t> buf(ctx->zbuf.data(), 256);
+		m_next_trie->tpl_restore_string_loop(nest_id, &buf);
+		if (FastLabel)
+			return fstring(buf.begin(), buf.size());
+		else
+			return fstring(buf.begin() + 1, buf.size() - 1);
+	}
 }
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
 size_t
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-getZpathFixed(size_t node_id, byte_t* buf, size_t cap) const {
-    assert(NULL != buf);
-    assert(node_id > 0);
-    assert(node_id < m_is_link.size());
-    assert(m_is_link[node_id]);
-    uint64_t linkVal = get_link_val(node_id);
-    if (linkVal < m_core_max_link_val) {
-        assert(NULL != m_core_data);
-        size_t length = size_t(linkVal &  m_core_len_mask) + m_core_min_len;
-        size_t offset = size_t(linkVal >> m_core_len_bits);
-        assert(offset < m_core_size);
-        assert(offset + length <= m_core_size);
-        assert(length >= 2);
-        if (FastLabel) {
-            const byte_t* src = m_core_data + offset;
-            size_t cnt = length;
-            do *buf++ = *src++, cnt--; while (cnt);
-            return length;
-        }
-        else {
-            const byte_t* src = m_core_data + offset + 1;
-            size_t cnt = --length;
-            do *buf++ = *src++, cnt--; while (cnt);
-            return length;
-        }
-    }
-    else {
-        assert(NULL != m_next_trie);
-        size_t nest_id = size_t(linkVal - m_core_max_link_val);
-        fixed_vec<byte_t> zbuf(buf, cap);
-        m_next_trie->tpl_restore_string_loop(nest_id, &zbuf);
-        assert(zbuf.size() >= 2);
-        if (FastLabel)
-            return zbuf.size();
-        else {
-            size_t len = zbuf.size()-1;
-            size_t cnt = len;
-            do buf[0] = buf[1], buf++, cnt--; while (cnt);
-            return len;
-        }
-    }
+getZpathFixed(size_t node_id, byte_t* buf, size_t cap) const noexcept {
+	assert(NULL != buf);
+	assert(node_id > 0);
+	assert(node_id < m_is_link.size());
+	assert(m_is_link[node_id]);
+	uint64_t linkVal = get_link_val(node_id);
+	if (linkVal < m_core_max_link_val) {
+		assert(NULL != m_core_data);
+		size_t length = size_t(linkVal &  m_core_len_mask) + m_core_min_len;
+		size_t offset = size_t(linkVal >> m_core_len_bits);
+		assert(offset < m_core_size);
+		assert(offset + length <= m_core_size);
+		//assert(length >= 2); // can be 1 if conf.commonPrefix.size() == 2
+		if (FastLabel) {
+			const byte_t* src = m_core_data + offset;
+			size_t cnt = length;
+			do *buf++ = *src++, cnt--; while (cnt);
+			return length;
+		}
+		else {
+			const byte_t* src = m_core_data + offset + 1;
+			size_t cnt = --length;
+			do *buf++ = *src++, cnt--; while (cnt);
+			return length;
+		}
+	}
+	else {
+		assert(NULL != m_next_trie);
+		size_t nest_id = size_t(linkVal - m_core_max_link_val);
+		fixed_vec<byte_t> zbuf(buf, cap);
+		m_next_trie->tpl_restore_string_loop(nest_id, &zbuf);
+		//assert(zbuf.size() >= 2); // can be 1 if conf.commonPrefix.size() == 2
+		if (FastLabel)
+			return zbuf.size();
+		else {
+			size_t len = zbuf.size()-1;
+			size_t cnt = len;
+			do buf[0] = buf[1], buf++, cnt--; while (cnt);
+			return len;
+		}
+	}
 }
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
 intptr_t
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-matchZpath(size_t node_id, const byte_t* str, size_t slen) const {
-    assert(node_id > 0);
-    assert(node_id < m_is_link.size());
-    assert(m_is_link[node_id]);
-    uint64_t linkVal = get_link_val(node_id);
-    size_t coreMaxLinkVal = m_core_max_link_val;
-    if (linkVal < coreMaxLinkVal) {
-        assert(NULL != m_core_data);
-        size_t length = size_t(linkVal &  m_core_len_mask) + m_core_min_len;
-        size_t offset = size_t(linkVal >> m_core_len_bits);
-        assert(offset < m_core_size);
-        assert(offset + length <= m_core_size);
-        assert(length >= 2);
-        if (!FastLabel) {
-            length--;
-        }
-        const byte_t* zpath = m_core_data + offset + (FastLabel?0:1);
-        size_t lim = std::min(slen, length);
-        size_t pos = 0;
-        while (pos < lim && str[pos] == zpath[pos]) ++pos;
-        if (pos < length)
-            return -intptr_t(pos);
-        else
-            return +intptr_t(pos);
-    }
-    else {
-        assert(NULL != m_next_trie);
-        size_t nest_id = size_t(linkVal - coreMaxLinkVal);
-        if (FastLabel)
-            return m_next_trie->matchZpath_loop(nest_id, 0, str, slen);
-        else
-            return m_next_trie->matchZpath_loop(nest_id, -1, str, slen);
-    }
+matchZpath(size_t node_id, const byte_t* str, size_t slen) const noexcept {
+	assert(node_id > 0);
+	assert(node_id < m_is_link.size());
+	assert(m_is_link[node_id]);
+	uint64_t linkVal = get_link_val(node_id);
+	size_t coreMaxLinkVal = m_core_max_link_val;
+	if (linkVal < coreMaxLinkVal) {
+		assert(NULL != m_core_data);
+		size_t length = size_t(linkVal &  m_core_len_mask) + m_core_min_len;
+		size_t offset = size_t(linkVal >> m_core_len_bits);
+		assert(offset < m_core_size);
+		assert(offset + length <= m_core_size);
+		//assert(length >= 2); // may be false if commonPrefix is set
+		if (!FastLabel) {
+			length--;
+		}
+		const byte_t* zpath = m_core_data + offset + (FastLabel?0:1);
+		size_t lim = std::min(slen, length);
+		size_t pos = 0;
+		while (pos < lim && str[pos] == zpath[pos]) ++pos;
+		if (pos < length)
+			return -intptr_t(pos);
+		else
+			return +intptr_t(pos);
+	}
+	else {
+		assert(NULL != m_next_trie);
+		size_t nest_id = size_t(linkVal - coreMaxLinkVal);
+		if (FastLabel)
+			return m_next_trie->matchZpath_loop(nest_id, 0, str, slen);
+		else
+			return m_next_trie->matchZpath_loop(nest_id, -1, str, slen);
+	}
 }
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-restore_string_loop(size_t node_id, valvec<byte_t>* str) const {
-    const size_t maxlen = m_max_strlen + 1;
-    const size_t oldsize = str->size();
-    str->ensure_capacity(oldsize + maxlen);
-    fixed_vec<byte_t> buf(str->begin() + oldsize, maxlen);
+restore_string_loop(size_t node_id, valvec<byte_t>* str) const noexcept {
+	const size_t maxlen = m_max_strlen + 1;
+	const size_t oldsize = str->size();
+	str->ensure_capacity(oldsize + maxlen);
+	fixed_vec<byte_t> buf(str->begin() + oldsize, maxlen);
 	tpl_restore_string_loop(node_id, &buf);
-    assert(buf.size() < maxlen);
-    *buf.end() = '\0';
-    str->risk_set_size(oldsize + buf.size());
+	assert(buf.size() < maxlen);
+	*buf.end() = '\0';
+	str->risk_set_size(oldsize + buf.size());
 }
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-restore_string_loop(size_t node_id, std::string* str) const {
-    const size_t maxlen = m_max_strlen;
-    const size_t oldsize = str->size();
-    str->resize(oldsize + maxlen);
-    fixed_vec<byte_t> buf((byte_t*)&*str->begin() + oldsize, maxlen);
+restore_string_loop(size_t node_id, std::string* str) const noexcept {
+	const size_t maxlen = m_max_strlen;
+	const size_t oldsize = str->size();
+	str->resize(oldsize + maxlen);
+	fixed_vec<byte_t> buf((byte_t*)&*str->begin() + oldsize, maxlen);
 	tpl_restore_string_loop(node_id, &buf);
-    str->resize(oldsize + buf.size());
+	str->resize(oldsize + buf.size());
 }
 template<class RankSelect, class RankSelect2, bool FastLabel>
 template<class StrBuf>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-tpl_restore_string_loop(size_t node_id, StrBuf* str) const {
-    tpl_restore_string_loop_ex(node_id, str, false);
+tpl_restore_string_loop(size_t node_id, StrBuf* str) const noexcept {
+	tpl_restore_string_loop_ex(node_id, str, false);
 }
 template<class RankSelect, class RankSelect2, bool FastLabel>
 template<class StrBuf>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-tpl_restore_string_loop_ex(size_t node_id, StrBuf* str, bool reverse) const {
+tpl_restore_string_loop_ex(size_t node_id, StrBuf* str, bool reverse) const noexcept {
 //	assert(node_id > 0);
 	assert(node_id < total_states());
 	typedef RankSelect RS;
@@ -842,8 +828,8 @@ tpl_restore_string_loop_ex(size_t node_id, StrBuf* str, bool reverse) const {
 	size_t coreMinLen = m_core_min_len;
 	while (parent != initial_state) {
 		assert(parent < m_is_link.size());
-        //RS2::fast_prefetch_rank1(isLinkRank, parent);
-        _mm_prefetch((const char*)&labelData[parent], _MM_HINT_T0);
+		//RS2::fast_prefetch_rank1(isLinkRank, parent);
+		_mm_prefetch((const char*)&labelData[parent], _MM_HINT_T0);
 		if (RS2::fast_is1(isLinkBits, parent)) {
 			size_t linkRank1 = RS2::fast_rank1(isLinkBits, isLinkRank, parent);
 			size_t hig_bits = UintVector::fast_get(linkData, linkBits, linkMask, linkMinVal, linkRank1);
@@ -892,10 +878,10 @@ tpl_restore_string_loop_ex(size_t node_id, StrBuf* str, bool reverse) const {
 template<class RankSelect, class RankSelect2, bool FastLabel>
 intptr_t
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-matchZpath_loop(size_t node_id, intptr_t pos, const byte_t* str, intptr_t slen) const {
+matchZpath_loop(size_t node_id, intptr_t pos, const byte_t* str, intptr_t slen) const noexcept {
 //	assert(node_id > 0);
 	assert(node_id < total_states());
-    assert(pos <= slen);
+	assert(pos <= slen);
 	typedef RankSelect RS;
 	typedef RankSelect2 RS2;
 	size_t parent = node_id;
@@ -951,11 +937,11 @@ matchZpath_loop(size_t node_id, intptr_t pos, const byte_t* str, intptr_t slen) 
 	size_t coreMinLen = m_core_min_len;
 	while (parent != initial_state) {
 		assert(parent < m_is_link.size());
-        if (pos == slen) { // zpath is longer than str
-            return -pos;
-        }
-        //RS2::fast_prefetch_rank1(isLinkRank, parent);
-        _mm_prefetch((const char*)&labelData[parent], _MM_HINT_T0);
+		if (pos == slen) { // zpath is longer than str
+			return -pos;
+		}
+		//RS2::fast_prefetch_rank1(isLinkRank, parent);
+		_mm_prefetch((const char*)&labelData[parent], _MM_HINT_T0);
 		if (RS2::fast_is1(isLinkBits, parent)) {
 			size_t linkRank1 = RS2::fast_rank1(isLinkBits, isLinkRank, parent);
 			size_t hig_bits = UintVector::fast_get(linkData, linkBits, linkMask, linkMinVal, linkRank1);
@@ -973,45 +959,45 @@ matchZpath_loop(size_t node_id, intptr_t pos, const byte_t* str, intptr_t slen) 
 				size_t offset = size_t(linkVal >> coreLenBits);
 				assert(offset < m_core_size);
 				assert(offset + length <= m_core_size);
-                const byte_t* zpath = coreData + offset;
-                const byte_t* pstr = str + pos;
-                const size_t  lim = std::min<size_t>(slen-pos, length);
-                size_t i = 0;
-                while (i < lim && zpath[i] == pstr[i]) ++i;
-                pos += i;
-                if (i < length)
-                    return -pos;
+				const byte_t* zpath = coreData + offset;
+				const byte_t* pstr = str + pos;
+				const size_t  lim = std::min<size_t>(slen-pos, length);
+				size_t i = 0;
+				while (i < lim && zpath[i] == pstr[i]) ++i;
+				pos += i;
+				if (i < length)
+					return -pos;
 			}
 			else {
 				size_t link_id = size_t(linkVal - coreMaxLinkVal);
 				intptr_t pos2 = nextTrie->matchZpath_loop(link_id, pos, str, slen);
-                if (pos2 > 0)
-                    pos = pos2;
-                else
-                    return pos2;
+				if (pos2 > 0)
+					pos = pos2;
+				else
+					return pos2;
 			}
 		}
 		else {
 			if (!FastLabel) {
 				if (str[pos] == labelData[parent])
-                    pos++;
-                else
-                    return -pos;
-            }
+					pos++;
+				else
+					return -pos;
+			}
 		}
 		size_t one_bitpos = RS::fast_select1(loudsBits, loudsSel1, loudsRank, parent);
 		if (FastLabel) {
 			const byte_t ch = byte_t(get_label(parent, one_bitpos));
-            if (str[pos] == ch)
-                pos++;
-            else
-                return -pos;
+			if (str[pos] == ch)
+				pos++;
+			else
+				return -pos;
 		}
-        assert(pos <= intptr_t(slen));
+		assert(pos <= intptr_t(slen));
 		parent = one_bitpos - parent - 1;
 	//	parent = m_louds.rank0(m_louds.select1(parent)) - 1;
 	}
-    return pos;
+	return pos;
 }
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
@@ -1093,23 +1079,23 @@ write_dot_file(fstring fname) const {
 template<class RankSelect, class RankSelect2, bool FastLabel>
 static void
 str_stat_loop(const NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>* trie,
-              AutoGrownMemIO& buf, size_t nestLevel) {
+			  AutoGrownMemIO& buf, size_t nestLevel) {
 	assert(trie->m_is_link.max_rank1() == trie->m_next_link.size());
 	buf.printf("-------------------------------------------------\n");
 	buf.printf("NestLevel  : %11zd\n", nestLevel);
 	buf.printf("ZpathLength: %11lld\n", (llong)trie->total_zpath_len());
 	buf.printf("NodeNumber : %11zd\n", trie->total_states());
 	buf.printf("LinkNumber : %11zd\n", trie->m_next_link.size());
-    if (FastLabel) {
-	    buf.printf("LinkIdxBits: %11zd (FastLabel)\n", trie->m_next_link.uintbits());
-	    buf.printf("LinkMemSize: %11zd (FastLabel)\n", trie->m_next_link.mem_size());
-    }
-    else {
-	    buf.printf("LinkIdxBits: %11zd (- low 8 bits)\n", trie->m_next_link.uintbits());
-	    buf.printf("LinkIdxBits: %11zd (+ low 8 bits)\n", trie->m_next_link.uintbits() + 8);
-	    buf.printf("LinkMemSize: %11zd (- low 8 bits)\n", trie->m_next_link.mem_size());
-	    buf.printf("LinkMemSize: %11zd (+ low 8 bits)\n", trie->m_next_link.mem_size() + trie->m_next_link.size());
-    }
+	if (FastLabel) {
+		buf.printf("LinkIdxBits: %11zd (FastLabel)\n", trie->m_next_link.uintbits());
+		buf.printf("LinkMemSize: %11zd (FastLabel)\n", trie->m_next_link.mem_size());
+	}
+	else {
+		buf.printf("LinkIdxBits: %11zd (- low 8 bits)\n", trie->m_next_link.uintbits());
+		buf.printf("LinkIdxBits: %11zd (+ low 8 bits)\n", trie->m_next_link.uintbits() + 8);
+		buf.printf("LinkMemSize: %11zd (- low 8 bits)\n", trie->m_next_link.mem_size());
+		buf.printf("LinkMemSize: %11zd (+ low 8 bits)\n", trie->m_next_link.mem_size() + trie->m_next_link.size());
+	}
 	buf.printf("LinkingRate: %11.7f\n", trie->m_next_link.size() / (double)trie->total_states());
 	buf.printf("CoreLenBits: %11zd\n", (size_t)trie->m_core_len_bits);
 	buf.printf("CoreMemSize: %11zd\n", (size_t)trie->m_core_size);
@@ -1142,64 +1128,64 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 build_patricia(SortableStrVec& strVec,
-               function<void(const valvec<index_t>&)> buildTerm,
-               const NestLoudsTrieConfig& conf)
+			   function<void(const valvec<size_t>&)> buildTerm,
+			   const NestLoudsTrieConfig& conf)
 {
-    build_patricia_tpl(strVec, buildTerm, conf);
+	build_patricia_tpl(strVec, buildTerm, conf);
 }
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 build_patricia(SortThinStrVec& strVec,
-               function<void(const valvec<index_t>&)> buildTerm,
-               const NestLoudsTrieConfig& conf)
+			   function<void(const valvec<size_t>&)> buildTerm,
+			   const NestLoudsTrieConfig& conf)
 {
-    build_patricia_tpl(strVec, buildTerm, conf);
+	build_patricia_tpl(strVec, buildTerm, conf);
 }
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 build_patricia(FixedLenStrVec& strVec,
-               function<void(const valvec<index_t>&)> buildTerm,
-               const NestLoudsTrieConfig& conf)
+			   function<void(const valvec<size_t>&)> buildTerm,
+			   const NestLoudsTrieConfig& conf)
 {
-    build_patricia_tpl(strVec, buildTerm, conf);
+	build_patricia_tpl(strVec, buildTerm, conf);
 }
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 build_patricia(VoSortedStrVec& strVec,
-               function<void(const valvec<index_t>&)> buildTerm,
-               const NestLoudsTrieConfig& conf)
+			   function<void(const valvec<size_t>&)> buildTerm,
+			   const NestLoudsTrieConfig& conf)
 {
-    build_patricia_tpl(strVec, buildTerm, conf);
+	build_patricia_tpl(strVec, buildTerm, conf);
 }
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 build_patricia(ZoSortedStrVec& strVec,
-               function<void(const valvec<index_t>&)> buildTerm,
-               const NestLoudsTrieConfig& conf)
+			   function<void(const valvec<size_t>&)> buildTerm,
+			   const NestLoudsTrieConfig& conf)
 {
-    build_patricia_tpl(strVec, buildTerm, conf);
+	build_patricia_tpl(strVec, buildTerm, conf);
 }
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 build_patricia(DoSortedStrVec& strVec,
-               function<void(const valvec<index_t>&)> buildTerm,
-               const NestLoudsTrieConfig& conf)
+			   function<void(const valvec<size_t>&)> buildTerm,
+			   const NestLoudsTrieConfig& conf)
 {
-    build_patricia_tpl(strVec, buildTerm, conf);
+	build_patricia_tpl(strVec, buildTerm, conf);
 }
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 build_patricia(QoSortedStrVec& strVec,
-               function<void(const valvec<index_t>&)> buildTerm,
-               const NestLoudsTrieConfig& conf)
+			   function<void(const valvec<size_t>&)> buildTerm,
+			   const NestLoudsTrieConfig& conf)
 {
-    build_patricia_tpl(strVec, buildTerm, conf);
+	build_patricia_tpl(strVec, buildTerm, conf);
 }
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
@@ -1207,8 +1193,8 @@ template<class StrVecType>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 build_patricia_tpl(StrVecType& strVec,
-                   function<void(const valvec<index_t>& linkVec)> buildTerm,
-                   const NestLoudsTrieConfig& conf)
+				   function<void(const valvec<size_t>& linkVec)> buildTerm,
+				   const NestLoudsTrieConfig& conf)
 {
 	assert(conf.nestLevel > 0);
 	if (strVec.size() == 0) {
@@ -1222,7 +1208,7 @@ build_patricia_tpl(StrVecType& strVec,
 		if (!conf.isInputSorted) {
 			strVec.sort();
 		}
-		valvec<index_t> linkVec;
+		valvec<size_t> linkVec;
 		build_self_trie_tpl(strVec, nestStrVec, linkVec, label, conf.nestLevel, conf);
 		if (conf.debugLevel >= 2)
 			fprintf(stderr
@@ -1234,17 +1220,17 @@ build_patricia_tpl(StrVecType& strVec,
 	if (nestStrVec.size() > 0) {
 	#if defined(USE_SUFFIX_ARRAY_TRIE)
 		if (conf.suffixTrie) {
-			nextStrVec.compact();
+			nestStrVec.compact();
 			conf.suffixTrie.reset();
 		}
 	#endif
-        if (nestStrVec.str_size() * conf.nestScale > inputStrVecBytes) {
-            nestStrVec.reverse_keys();
-            build_nested(nestStrVec, label, conf.nestLevel, conf);
-        }
-        else {
-            this->build_core_no_reverse_keys(nestStrVec, label, conf);
-        }
+		if (nestStrVec.str_size() * conf.nestScale > inputStrVecBytes && conf.nestLevel > 1) {
+			nestStrVec.reverse_keys();
+			build_nested(nestStrVec, label, conf.nestLevel, conf);
+		}
+		else {
+			this->build_core_no_reverse_keys(nestStrVec, label, conf);
+		}
 	}
 	else {
 		assert(m_is_link.max_rank1() == 0);
@@ -1297,8 +1283,8 @@ build_patricia_tpl(StrVecType& strVec,
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-build_strpool2(SortableStrVec& strVec, valvec<index_t>& linkVec,
-               const NestLoudsTrieConfig& conf) {
+build_strpool2(SortableStrVec& strVec, valvec<size_t>& linkVec,
+			   const NestLoudsTrieConfig& conf) {
 	assert(conf.nestLevel > 0);
 	if (strVec.size() == 0) {
 		THROW_STD(invalid_argument, "input strVec is empty");
@@ -1316,17 +1302,18 @@ build_strpool2(SortableStrVec& strVec, valvec<index_t>& linkVec,
 			conf.suffixTrie.reset();
 		}
 	#endif
-        if (strVec.str_size() * conf.nestScale > inputStrVecBytes) {
-            strVec.reverse_keys();
-            build_nested(strVec, label, conf.nestLevel, conf);
-        }
-        else {
-            this->build_core_no_reverse_keys(strVec, label, conf);
-        }
+		if (strVec.str_size() * conf.nestScale > inputStrVecBytes && conf.nestLevel > 1) {
+			strVec.reverse_keys();
+			build_nested(strVec, label, conf.nestLevel, conf);
+		}
+		else {
+			this->build_core_no_reverse_keys(strVec, label, conf);
+		}
 	}
 	else {
 		assert(m_is_link.max_rank1() == 0);
 		m_label_data = label.risk_release_ownership();
+	  if (conf.debugLevel >= 1)
 		fprintf(stderr
 			, "WARN: %s: strVec is empty: curNestLevel = %d  maxNestLevel = %d\n"
 			, BOOST_CURRENT_FUNCTION, conf.nestLevel-1, conf.nestLevel
@@ -1340,8 +1327,8 @@ build_strpool2(SortableStrVec& strVec, valvec<index_t>& linkVec,
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-build_strpool(SortableStrVec& strVec, valvec<index_t>& linkVec,
-              const NestLoudsTrieConfig& conf)
+build_strpool(SortableStrVec& strVec, valvec<size_t>& linkVec,
+			  const NestLoudsTrieConfig& conf)
 {
 	if (strVec.size() == 0) {
 		THROW_STD(invalid_argument, "input strVec is empty");
@@ -1355,8 +1342,8 @@ build_strpool(SortableStrVec& strVec, valvec<index_t>& linkVec,
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-build_strpool_loop(SortableStrVec& strVec, valvec<index_t>& linkVec,
-                   size_t curNestLevel, const NestLoudsTrieConfig& conf)
+build_strpool_loop(SortableStrVec& strVec, valvec<size_t>& linkVec,
+				   size_t curNestLevel, const NestLoudsTrieConfig& conf)
 {
 	assert(!FastLabel);
 	if (strVec.size() == 0) {
@@ -1387,6 +1374,7 @@ build_strpool_loop(SortableStrVec& strVec, valvec<index_t>& linkVec,
 	else {
 		assert(m_is_link.max_rank1() == 0);
 		m_label_data = label.risk_release_ownership();
+	  if (conf.debugLevel >= 1)
 		fprintf(stderr
 			, "WARN: %s: strVec is empty: curNestLevel = %zd  maxNestLevel = %d\n"
 			, BOOST_CURRENT_FUNCTION, curNestLevel, conf.nestLevel
@@ -1400,7 +1388,7 @@ build_strpool_loop(SortableStrVec& strVec, valvec<index_t>& linkVec,
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-build_link(valvec<index_t>& nextLinkVec, valvec<byte_t>& label) {
+build_link(valvec<size_t>& nextLinkVec, valvec<byte_t>& label) {
 	if (!FastLabel) {
 		for (size_t j = 0, k = 0; k < m_is_link.size(); ++k) {
 			if (m_is_link[k]) {
@@ -1417,183 +1405,195 @@ build_link(valvec<index_t>& nextLinkVec, valvec<byte_t>& label) {
 
 static void
 compress_core(SortableStrVec& strVec, const NestLoudsTrieConfig& conf) {
-    if (conf.corestrCompressLevel > 0) {
-        profiling pf;
-        long long t0 = pf.now();
-        strVec.compress_strpool(conf.corestrCompressLevel);
-        if (conf.debugLevel >= 2) {
-            long long t1 = pf.now();
-            long long len = strVec.str_size();
-            size_t dup = 0;
-            for (size_t i = 1, n = strVec.size(); i < n; ++i) {
-                if (strVec.nth_offset(i-1) == strVec.nth_offset(i))
-                    dup++;
-            }
-            fprintf(stderr,
-                "compress_core: compressed={dup: %zd, cnt: %zd, len: %lld, dupRatio: %f} time=%f\n",
-                dup, strVec.size(), len, 1.0*dup/strVec.size(), pf.sf(t0, t1));
-        }
-    }
-    strVec.sort_by_seq_id();
+	if (conf.corestrCompressLevel > 0) {
+		profiling pf;
+		long long t0 = pf.now();
+		strVec.compress_strpool(conf.corestrCompressLevel);
+		if (conf.debugLevel >= 2) {
+			long long t1 = pf.now();
+			long long len = strVec.str_size();
+			size_t dup = 0;
+			for (size_t i = 1, n = strVec.size(); i < n; ++i) {
+				if (strVec.nth_offset(i-1) == strVec.nth_offset(i))
+					dup++;
+			}
+			fprintf(stderr,
+				"compress_core: compressed={dup: %zd, cnt: %zd, len: %lld, dupRatio: %f} time=%f\n",
+				dup, strVec.size(), len, 1.0*dup/strVec.size(), pf.sf(t0, t1));
+		}
+	}
+	strVec.sort_by_seq_id();
 }
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 build_mixed(SortableStrVec& strVec, valvec<byte_t>& label,
-            size_t curNestLevel, const NestLoudsTrieConfig& conf) {
-    valvec<index_t> nextLinkVec;
-    valvec<index_t> coreLinkVec;
-    febitvec isShort(strVec.size(), false);
-    SortableStrVec coreStrVec;
-    size_t coreStrLen = 0;
-    size_t coreStrNum = 0;
-    for(size_t i = 0, n = strVec.size(); i < n; ++i) {
-        size_t l = strVec.nth_size(i);
-        if (l <= MaxShortStrLen) {
-            isShort.set1(strVec.m_index[i].seq_id);
-            coreStrLen += l;
-            coreStrNum += 1;
-        }
-    }
-    if (coreStrNum) {
-        coreStrVec.reserve(coreStrNum, coreStrLen);
-        strVec.erase_if2([&](size_t i, fstring str) {
-            if (str.size() <= MaxShortStrLen) {
-                coreStrVec.push_back(str);
-                coreStrVec.m_index.back().seq_id = strVec.m_index[i].seq_id;
-                return true;
-            }
-            return false;
-        });
-        coreStrVec.reverse_keys();
-        strVec.shrink_to_fit();
-        strVec.sort_by_seq_id(); // before here, it was sorted by offset
-        strVec.make_ascending_seq_id();
-        compress_core(coreStrVec, conf);
-        coreStrVec.make_ascending_seq_id();
-        coreLinkVec.resize_no_init(coreStrVec.size());
-        const size_t minLen = MaxShortStrLen - 1;
-        const size_t lenBits = 1;
-        for(size_t i = 0; i < coreStrVec.size(); ++i) {
-            size_t offset = coreStrVec.m_index[i].offset;
-            size_t keylen = coreStrVec.m_index[i].length;
-            size_t val = (offset << lenBits) | (keylen - minLen);
-            coreLinkVec[i] = index_t(val);
-        }
-        TERARK_VERIFY_EQ(label.size(), m_is_link.size());
-        coreStrVec.m_index.clear(); // free memory earlier
-        label.reserve(label.size() + coreStrVec.str_size()); // alloc exact
-        label.append(coreStrVec.m_strpool);
-        m_core_size = coreStrVec.str_size();
-        m_core_data = label.data() + m_is_link.size();
-        m_core_len_bits = byte_t(lenBits);
-        m_core_len_mask = (size_t(1) << lenBits) - 1;
-        m_core_min_len = byte_t(minLen);
-        m_core_max_link_val = coreStrVec.str_size() << lenBits;
-        coreStrVec.clear();
-    }
-    if (strVec.size()) {
-        m_next_trie = new NestLoudsTrieTpl<RankSelect>();
-        m_next_trie->build_strpool_loop(strVec, nextLinkVec, curNestLevel-1, conf);
-    }
-    size_t coreMaxLinkVal = m_core_max_link_val;
-    size_t j = coreLinkVec.size();
-    size_t k = isShort.size();
-    // it is likely that coreLinkVec.size() > nextLinkVec.size()
-    coreLinkVec.resize_no_init(isShort.size());
-    while (k-- > 0) {
-        if (isShort[k])
-            coreLinkVec[k] = coreLinkVec[--j];
-        else
-            coreLinkVec[k] = nextLinkVec[k-j] + coreMaxLinkVal;
-    }
-    nextLinkVec.clear();
-    isShort.clear();
-    build_link(coreLinkVec, label);
+			size_t curNestLevel, const NestLoudsTrieConfig& conf) {
+	valvec<size_t> nextLinkVec;
+	valvec<size_t> coreLinkVec;
+	febitvec isInCore(strVec.size(), false);
+	SortableStrVec coreStrVec;
+	size_t coreStrLen = 0;
+	size_t coreStrNum = 0;
+	size_t minLen = size_t(-1);
+	size_t maxLen = 0;
+	for(size_t i = 0, n = strVec.size(); i < n; ++i) {
+		size_t l = strVec.nth_size(i);
+		size_t seq_id = strVec.nth_seq_id(i);
+		TERARK_ASSERT_LT(seq_id, conf.isHiFreqFrag.size());
+		if (l <= MaxShortStrLen || conf.isHiFreqFrag[seq_id]) {
+			isInCore.set1(seq_id);
+			coreStrLen += l;
+			coreStrNum += 1;
+			minLen = std::min(minLen, l);
+			maxLen = std::max(maxLen, l);
+		}
+	}
+	if (coreStrNum) {
+		size_t lenBits = UintVecMin0::compute_uintbits(maxLen - minLen); // can be 0
+		if (conf.debugLevel >= 2) {
+		  fprintf(stderr
+			  , "build_mixed: core: cnt=%zd pool=%zd avg=%f, min=%zd max=%zd lenBits=%zd\n"
+			  , strVec.size(), strVec.str_size(), strVec.avg_size()
+			  , minLen, maxLen, lenBits);
+		}
+		coreStrVec.reserve(coreStrNum, coreStrLen);
+		strVec.erase_if2([&](size_t i, fstring str) {
+			size_t seq_id = strVec.m_index[i].seq_id;
+			if (isInCore[seq_id]) {
+				coreStrVec.push_back(str);
+				coreStrVec.m_index.back().seq_id = seq_id;
+				return true;
+			}
+			return false;
+		});
+		coreStrVec.reverse_keys();
+		strVec.shrink_to_fit();
+		strVec.sort_by_seq_id(); // before here, it was sorted by offset
+		strVec.make_ascending_seq_id();
+		compress_core(coreStrVec, conf);
+		coreStrVec.make_ascending_seq_id();
+		coreLinkVec.resize_no_init(coreStrVec.size());
+		for(size_t i = 0; i < coreStrVec.size(); ++i) {
+			size_t offset = coreStrVec.m_index[i].offset;
+			size_t keylen = coreStrVec.m_index[i].length;
+			size_t val = (offset << lenBits) | (keylen - minLen);
+			coreLinkVec[i] = val;
+		}
+		TERARK_VERIFY_EQ(label.size(), m_is_link.size());
+		coreStrVec.m_index.clear(); // free memory earlier
+		label.reserve(label.size() + coreStrVec.str_size()); // alloc exact
+		label.append(coreStrVec.m_strpool);
+		m_core_size = coreStrVec.str_size();
+		m_core_data = label.data() + m_is_link.size();
+		m_core_len_bits = byte_t(lenBits);
+		m_core_len_mask = (size_t(1) << lenBits) - 1;
+		m_core_min_len = byte_t(minLen);
+		m_core_max_link_val = coreStrVec.str_size() << lenBits;
+		coreStrVec.clear();
+	}
+	if (strVec.size()) {
+		m_next_trie = new NestLoudsTrieTpl<RankSelect>();
+		m_next_trie->build_strpool_loop(strVec, nextLinkVec, curNestLevel-1, conf);
+	}
+	size_t coreMaxLinkVal = m_core_max_link_val;
+	size_t j = coreLinkVec.size();
+	size_t k = isInCore.size();
+	// it is likely that coreLinkVec.size() > nextLinkVec.size()
+	coreLinkVec.resize_no_init(isInCore.size());
+	while (k-- > 0) {
+		if (isInCore[k])
+			coreLinkVec[k] = coreLinkVec[--j];
+		else
+			coreLinkVec[k] = nextLinkVec[k-j] + coreMaxLinkVal;
+	}
+	nextLinkVec.clear();
+	isInCore.clear();
+	build_link(coreLinkVec, label);
 }
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 build_nested(SortableStrVec& strVec, valvec<byte_t>& label,
-             size_t curNestLevel, const NestLoudsTrieConfig& conf) {
-    if (conf.useMixedCoreLink) {
-        this->build_mixed(strVec, label, curNestLevel, conf);
-    }
-    else {
-        valvec<index_t> nextLinkVec;
-        m_next_trie = new NestLoudsTrieTpl<RankSelect>();
-        m_next_trie->build_strpool_loop(strVec, nextLinkVec, curNestLevel-1, conf);
-        this->build_link(nextLinkVec, label);
-    }
+			 size_t curNestLevel, const NestLoudsTrieConfig& conf) {
+	if (conf.useMixedCoreLink) {
+		this->build_mixed(strVec, label, curNestLevel, conf);
+	}
+	else {
+		valvec<size_t> nextLinkVec;
+		m_next_trie = new NestLoudsTrieTpl<RankSelect>();
+		m_next_trie->build_strpool_loop(strVec, nextLinkVec, curNestLevel-1, conf);
+		this->build_link(nextLinkVec, label);
+	}
 }
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 debug_equal_check(const NestLoudsTrieTpl& y) const {
-    auto& x = *this;
-    assert(x.m_louds.size() == y.m_louds.size());
-    assert(memcmp(x.m_louds.data(), y.m_louds.data(), x.m_louds.mem_size()) == 0);
+	auto& x = *this;
+	assert(x.m_louds.size() == y.m_louds.size());
+	assert(memcmp(x.m_louds.data(), y.m_louds.data(), x.m_louds.mem_size()) == 0);
 
-    assert(x.m_is_link.size() == y.m_is_link.size());
-    assert(memcmp(x.m_is_link.data(), y.m_is_link.data(), y.m_is_link.mem_size()) == 0);
+	assert(x.m_is_link.size() == y.m_is_link.size());
+	assert(memcmp(x.m_is_link.data(), y.m_is_link.data(), y.m_is_link.mem_size()) == 0);
 
-    assert(x.m_next_link.size() == y.m_next_link.size());
-    assert(memcmp(x.m_next_link.data(), y.m_next_link.data(), x.m_next_link.mem_size()) == 0);
+	assert(x.m_next_link.size() == y.m_next_link.size());
+	assert(memcmp(x.m_next_link.data(), y.m_next_link.data(), x.m_next_link.mem_size()) == 0);
 
-    assert(memcmp(x.m_label_data, y.m_label_data, x.m_is_link.size()) == 0);
+	assert(memcmp(x.m_label_data, y.m_label_data, x.m_is_link.size()) == 0);
 
-    assert(x.m_core_size == y.m_core_size);
-    assert(x.m_core_len_mask == y.m_core_len_mask);
-    assert(x.m_core_len_bits == y.m_core_len_bits);
-    assert(x.m_core_min_len == y.m_core_min_len);
-    assert(x.m_core_max_link_val == y.m_core_max_link_val);
-    assert(memcmp(x.m_core_data, y.m_core_data, x.m_core_size) == 0);
+	assert(x.m_core_size == y.m_core_size);
+	assert(x.m_core_len_mask == y.m_core_len_mask);
+	assert(x.m_core_len_bits == y.m_core_len_bits);
+	assert(x.m_core_min_len == y.m_core_min_len);
+	assert(x.m_core_max_link_val == y.m_core_max_link_val);
+	assert(memcmp(x.m_core_data, y.m_core_data, x.m_core_size) == 0);
 
-    if (x.m_next_trie && y.m_next_trie) {
-        x.m_next_trie->debug_equal_check(*y.m_next_trie);
-    } else {
-        assert(NULL == x.m_next_trie);
-        assert(NULL == y.m_next_trie);
-    }
+	if (x.m_next_trie && y.m_next_trie) {
+		x.m_next_trie->debug_equal_check(*y.m_next_trie);
+	} else {
+		assert(NULL == x.m_next_trie);
+		assert(NULL == y.m_next_trie);
+	}
 }
 
 namespace nlt_detail {
 
-    template<class UintType>
-    struct RangeTpl {
-        UintType begRow;
-        UintType endRow;
-        UintType begCol;
-        RangeTpl(size_t beg, size_t end, size_t pos) {
-            begRow = UintType(beg);
-            endRow = UintType(end);
-            begCol = UintType(pos);
-        }
-        RangeTpl() {}
-        bool empty() const { return begRow == endRow; }
-    };
+	template<class UintType>
+	struct RangeTpl {
+		UintType begRow;
+		UintType endRow;
+		UintType begCol;
+		RangeTpl(size_t beg, size_t end, size_t pos) {
+			begRow = UintType(beg);
+			endRow = UintType(end);
+			begCol = UintType(pos);
+		}
+		RangeTpl() {}
+		bool empty() const { return begRow == endRow; }
+	};
 #pragma pack(push, 1)
-    template<>
-    struct RangeTpl<uint64_t> {
-        uint64_t begRow : 48;
-        uint64_t endRow : 48;
-        uint64_t begCol : 32;
-        RangeTpl(size_t beg, size_t end, size_t pos) {
-            begRow = beg;
-            endRow = end;
-            begCol = pos;
-        }
-        RangeTpl() {}
-        bool empty() const { return begRow == endRow; }
-    };
+	template<>
+	struct RangeTpl<uint64_t> {
+		uint64_t begRow : 48;
+		uint64_t endRow : 48;
+		uint64_t begCol : 32;
+		RangeTpl(size_t beg, size_t end, size_t pos) {
+			begRow = beg;
+			endRow = end;
+			begCol = pos;
+		}
+		RangeTpl() {}
+		bool empty() const { return begRow == endRow; }
+	};
 #pragma pack(pop)
 #if defined(_MSC_VER)
-    // visual c++ 2015 sucks
+	// visual c++ 2015 sucks
 #else
-    BOOST_STATIC_ASSERT(sizeof(RangeTpl<uint64_t>) == 16);
+	BOOST_STATIC_ASSERT(sizeof(RangeTpl<uint64_t>) == 16);
 #endif
 
 	struct RangeFast {
@@ -1661,9 +1661,6 @@ namespace nlt_detail {
 				, fpath.data(), strerror(errno));
 		}
 	}
-}
-
-using namespace nlt_detail;
 
 template<class T>
 class OnePassQueue : boost::noncopyable {
@@ -1717,23 +1714,23 @@ public:
 		iTmpBuf.attach(&tmpFile);
 	}
 	~TempFile() {
-    if (oTmpBuf.bufpos() > 0) {
-      fprintf(stderr
-        , "ERROR: %s, file(%s) %zd bytes in write buffer, it should have been flushed\n"
-        , BOOST_CURRENT_FUNCTION, tmpFpath.c_str(), oTmpBuf.bufpos());
-      fflush(stderr);
-      // if do not reset, it should coredump
-      TERARK_IF_DEBUG(abort(), oTmpBuf.resetbuf());
-    }
-    if (iTmpBuf.buf_remain_bytes() > 0) {
-      fprintf(stderr
-        , "ERROR: %s, file(%s) %zd bytes in read buffer, it should have been read in\n"
-        , BOOST_CURRENT_FUNCTION, tmpFpath.c_str(), oTmpBuf.buf_remain_bytes());
-      fflush(stderr);
-      // if do not reset, it should coredump
-      TERARK_IF_DEBUG(abort(), iTmpBuf.resetbuf());
-    }
-    tmpFile.close();
+	if (oTmpBuf.bufpos() > 0) {
+		fprintf(stderr
+			, "ERROR: %s, file(%s) %zd bytes in write buffer, it should have been flushed\n"
+			, BOOST_CURRENT_FUNCTION, tmpFpath.c_str(), oTmpBuf.bufpos());
+		fflush(stderr);
+		// if do not reset, it should coredump
+		TERARK_IF_DEBUG(abort(), oTmpBuf.resetbuf());
+	}
+	if (iTmpBuf.buf_remain_bytes() > 0) {
+		fprintf(stderr
+			, "ERROR: %s, file(%s) %zd bytes in read buffer, it should have been read in\n"
+			, BOOST_CURRENT_FUNCTION, tmpFpath.c_str(), oTmpBuf.buf_remain_bytes());
+		fflush(stderr);
+		// if do not reset, it should coredump
+		TERARK_IF_DEBUG(abort(), iTmpBuf.resetbuf());
+	}
+	tmpFile.close();
 		if (::remove(tmpFpath.c_str()) < 0) {
 			fprintf(stderr, "ERROR: remove(%s) = %s\n", tmpFpath.c_str(), strerror(errno));
 		}
@@ -1774,8 +1771,8 @@ public:
 
 template<class T>
 class OnePassQueue<T>::InFile : public OnePassQueue<T>, private TempFile {
-	size_t    m_cur;
-	size_t    m_size;
+	size_t m_cur;
+	size_t m_size;
 public:
 	typedef typename NoneBitField<T>::type FastT;
 	InFile(fstring tmpDir, fstring prefix) : TempFile(tmpDir, prefix) {
@@ -1820,7 +1817,7 @@ public:
 	}
 	virtual void rewind_for_write() override {
 		tmpFile.rewind();
-        iTmpBuf.resetbuf();
+		iTmpBuf.resetbuf();
 		oTmpBuf.resetbuf();
 		m_cur = size_t(-1);
 		m_size = 0;
@@ -1835,7 +1832,7 @@ public:
 template<class T>
 class OnePassQueue<T>::InMem : public OnePassQueue<T> {
 	valvec<T> m_vec;
-	size_t    m_cur;
+	size_t m_cur;
 public:
 	typedef typename NoneBitField<T>::type FastT;
 	InMem() : m_cur(size_t(-1)) {}
@@ -1884,28 +1881,28 @@ OnePassQueue<T>::create(fstring tmpDir, fstring prefix) {
 
 template<class UintType>
 struct LinkSeqTpl {
-    UintType link_id;
-    UintType seq_id;
-    LinkSeqTpl(size_t link, size_t seq)
-        : link_id(UintType(link)), seq_id(UintType(seq)) {}
-    LinkSeqTpl() {}
-    DATA_IO_DUMP_RAW_MEM(LinkSeqTpl)
+	UintType link_id;
+	UintType seq_id;
+	LinkSeqTpl(size_t link, size_t seq)
+		: link_id(UintType(link)), seq_id(UintType(seq)) {}
+	LinkSeqTpl() {}
+	DATA_IO_DUMP_RAW_MEM(LinkSeqTpl)
 };
 template<>
 struct LinkSeqTpl<uint64_t> {
-    uint64_t link_id;
-    uint64_t seq_id;
-    LinkSeqTpl(size_t link, size_t seq)
-        : link_id(link), seq_id(seq) {}
-    LinkSeqTpl() {}
-    DATA_IO_DUMP_RAW_MEM(LinkSeqTpl)
+	uint64_t link_id;
+	uint64_t seq_id;
+	LinkSeqTpl(size_t link, size_t seq)
+		: link_id(link), seq_id(seq) {}
+	LinkSeqTpl() {}
+	DATA_IO_DUMP_RAW_MEM(LinkSeqTpl)
 };
 
 template<class T>
 class CompressedRangeQueueBase : public OnePassQueue<T> {
-	size_t    m_cur;
-	size_t    m_size;
-	size_t    m_prevEndRow;
+	size_t m_cur;
+	size_t m_size;
+	size_t m_prevEndRow;
 protected:
 	typedef typename NoneBitField<T>::type FastT;
 	CompressedRangeQueueBase() { init_for_write(); }
@@ -2063,6 +2060,10 @@ createRangeQueue(const NestLoudsTrieConfig& conf, fstring prefix) {
 	}
 }
 
+} // namespace nlt_detail
+
+using namespace nlt_detail;
+
 ///@param[inout] strVec
 ///@param[out]   linkVec
 ///@param[out]   label
@@ -2070,25 +2071,27 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 build_self_trie(SortableStrVec& strVec,
-                valvec<index_t>& linkVec,
-                valvec<byte_t>& label,
-                size_t curNestLevel,
-                const NestLoudsTrieConfig& conf)
+				valvec<size_t>& linkVec,
+				valvec<byte_t>& label,
+				size_t curNestLevel,
+				const NestLoudsTrieConfig& conf)
 {
-    SortableStrVec nestStrVec;
-    build_self_trie_tpl(strVec, nestStrVec, linkVec, label, curNestLevel, conf);
-    strVec.swap(nestStrVec);
+	SortableStrVec nestStrVec;
+	build_self_trie_tpl(strVec, nestStrVec, linkVec, label, curNestLevel, conf);
+	strVec.swap(nestStrVec);
 }
+
+const size_t MAX_FRAG = TERARK_IF_DEBUG(6, 253);
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
 template<class StrVecType>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
-                    valvec<index_t>& linkVec,
-                    valvec<byte_t>& label,
-                    size_t curNestLevel,
-                    const NestLoudsTrieConfig& conf)
+					valvec<size_t>& linkVec,
+					valvec<byte_t>& label,
+					size_t curNestLevel,
+					const NestLoudsTrieConfig& conf)
 {
 	TERARK_VERIFY(strVec.size() > 0);
 	TERARK_VERIFY_EZ(label.size()); // NOLINT
@@ -2101,14 +2104,14 @@ build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
 	if (m_label_data) {
 		THROW_STD(invalid_argument, "trie must be empty");
 	}
-    m_max_strlen = strVec.max_strlen();
+	m_max_strlen = strVec.max_strlen();
 	if (curNestLevel < size_t(conf.nestLevel)) {
 		tryPrintNestStrOutput(strVec, conf.nestLevel - curNestLevel);
 	}
 	if (conf.debugLevel >= 2) {
 		// must have been sorted
 		for (size_t i = 1; i < strVec.size(); ++i) {
-			assert(strVec[i-1] <= strVec[i]);
+			TERARK_VERIFY_F(strVec[i-1] <= strVec[i], "%zd of %zd", i, strVec.size());
 		}
 	}
 	size_t minLinkStrLen = getRealMinLinkStrLen(conf);
@@ -2118,22 +2121,23 @@ build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
 	double fmaxFragLen1 = conf.minFragLen * pow(q, curNestLevel + 1);
 	double fmaxFragLen2 = fmaxFragLen1/q;
 	double fmaxFragLen3 = fmaxFragLen2/q;
-	size_t maxFragLen0 = std::min<size_t>(conf.maxFragLen, 253);
+	size_t maxFragLen0 = std::min<size_t>(conf.maxFragLen, MAX_FRAG);
 	size_t maxFragLen1 = ceil(fmaxFragLen1);
 	size_t maxFragLen2 = ceil(fmaxFragLen2);
 	size_t maxFragLen3 = ceil(fmaxFragLen3);
 	size_t minFragLen1 = std::max<long>(4, conf.minFragLen);
 	if (conf.debugLevel >= 1) {
 		fprintf(stderr
-		, "build_self_trie: q=%f cur=%zd frag=(%f %f) cnt=%zd len=%zd avglen=%f\n"
+		, "build_self_trie: prefix=%s q=%f cur=%zd frag=(%f %f) cnt=%zd len=%zd avglen=%f\n"
+		, conf.commonPrefix.c_str()
 		, q, curNestLevel, fmaxFragLen1, fmaxFragLen2
 		, strVec.size(), strVec.str_size(), strVec.avg_size()
 		);
 	}
 	TERARK_VERIFY_LE(minFragLen1, maxFragLen1);
-	maxFragLen1 = std::min<size_t>(maxFragLen1, 253);
-	maxFragLen2 = std::min<size_t>(maxFragLen2, 253);
-	maxFragLen3 = std::min<size_t>(maxFragLen3, 253);
+	maxFragLen1 = std::min<size_t>(maxFragLen1, MAX_FRAG);
+	maxFragLen2 = std::min<size_t>(maxFragLen2, MAX_FRAG);
+	maxFragLen3 = std::min<size_t>(maxFragLen3, MAX_FRAG);
 #endif
 	std::unique_ptr<TempFile> linkSeqStore;
 	const size_t strVecSize = strVec.size();
@@ -2142,9 +2146,9 @@ build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
 		linkSeqStore.reset(new TempFile(conf.tmpDir, "linkSeqVec-"));
 	}
 	else {
-		linkVec.resize_fill(strVecSize, index_t(-1));
+		linkVec.resize_fill(strVecSize, size_t(-1));
 	}
-    typedef LinkSeqTpl<index_t> LinkSeq;
+	typedef LinkSeqTpl<index_t> LinkSeq;
 	auto q1 = createRangeQueue<index_t>(conf, "q1-");
 	auto q2 = createRangeQueue<index_t>(conf, "q2-");
 	auto labelStore = OnePassQueue<byte_t>::create(conf.tmpDir, "label-");
@@ -2157,47 +2161,128 @@ build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
 	} else {
 		nextStrVecStore = OnePassQueue<SortableStrVec::OffsetLength>::create(conf.tmpDir, "nestStrVec-");
 	}
+	conf.isHiFreqFrag.resize(0);
 	size_t depth = 0;
-	{
+	auto bfsPutRoot = [&]() {
 		// allowing empty strings
 		size_t firstNonEmpty = upper_bound_0<StrVecType&>(strVec, strVecSize, "");
 		for(size_t i = 0; i < firstNonEmpty; ++i) {
 			size_t seq_id = strVec.nth_seq_id(i);
 			if (linkSeqStore)
-				linkSeqStore->oTmpBuf << LinkSeq(0, seq_id);
+				linkSeqStore->oTmpBuf << LinkSeq(m_is_link.size() - 1, seq_id);
 			else
-				linkVec[seq_id] = 0;
+				linkVec[seq_id] = m_is_link.size() - 1;
 		}
 		if (conf.debugLevel >= 1) {
 			fprintf(stderr, "build_self_trie: firstNonEmpty = %zd\n", firstNonEmpty);
 		}
 		q1->push_back({firstNonEmpty, strVecSize, 0});
 		q1->complete_write();
-	}
+	};
 #if defined(USE_SUFFIX_ARRAY_TRIE)
-	if (conf.saFragMinFreq &&
-(!conf.suffixTrie || strVec.m_real_str_size < strVec.str_size() * 0.7)) {
-		size_t minTokenLen = 8;
-		size_t minCacheDist = 32;
-		size_t bfsMaxDepth = 8;
-		conf.suffixTrie.reset(new SuffixTrieCacheDFA());
-		conf.suffixTrie->build_sa(strVec);
-		conf.suffixTrie->bfs_build_cache(minTokenLen, minCacheDist, bfsMaxDepth);
-		if (conf.debugLevel >= 1)
-			conf.suffixTrie->sa_print_stat();
-	}
-	else if (conf.bzMinLen) {
-		size_t minTokenLen = 8;
-	//	size_t minCacheDist = 32;
-		strVec.make_ascending_offset();
-		conf.bestZipLenArr = (uint16_t*)::realloc(conf.bestZipLenArr, strVec.str_size()*sizeof(uint16_t));
-		ComputeBestZipLen(strVec, minTokenLen, conf.bestZipLenArr);
+	if (boost::is_same<StrVecType, SortableStrVec>::value) {
+		if (conf.saFragMinFreq && (!conf.suffixTrie || strVec.m_real_str_size < strVec.str_size() * 0.7)) {
+			size_t minTokenLen = 8;
+			size_t minCacheDist = 32;
+			size_t bfsMaxDepth = 8;
+			conf.suffixTrie.reset(new SuffixTrieCacheDFA());
+			conf.suffixTrie->build_sa(strVec);
+			conf.suffixTrie->bfs_build_cache(minTokenLen, minCacheDist, bfsMaxDepth);
+			if (conf.debugLevel >= 1)
+				conf.suffixTrie->sa_print_stat();
+		}
+		else if (conf.bzMinLen) {
+			size_t minTokenLen = 8;
+		//	size_t minCacheDist = 32;
+			strVec.make_ascending_offset();
+			conf.bestZipLenArr = (uint16_t*)::realloc(conf.bestZipLenArr, strVec.str_size()*sizeof(uint16_t));
+			ComputeBestZipLen(strVec, minTokenLen, conf.bestZipLenArr);
+		}
 	}
 #endif
 	m_is_link.push_back(false); // reserve unused
 	m_louds.push_back(true);
 	m_louds.push_back(false);
 	labelStore->push_back(0); // reserve unused
+
+	auto writePrefixFrag = [&](fstring frag) {
+		m_louds.push_back(true);
+		m_louds.push_back(false);
+		if (frag.size() > 1) {
+			nestStrVecSize++;
+			nestStrPoolSize += frag.size() - (FastLabel ? 1 : 0);
+			if (nestStrPoolFile) {
+				if (FastLabel)
+				  nestStrPoolFile->oTmpBuf << frag.substr(1);
+				else
+				  nestStrPoolFile->oTmpBuf << frag;
+			} else { // reserve for change/patch later
+				nextStrVecStore->push_back({0,0});
+			}
+			if (FastLabel) {
+				labelStore->push_back(frag[0]);
+			} else {
+				labelStore->push_back(0); // reserved for latter use
+			}
+			conf.isHiFreqFrag.push_back(true);
+			m_is_link.push_back(true);
+		} else {
+			labelStore->push_back(frag[0]);
+			m_is_link.push_back(false);
+		}
+	};
+	const size_t prefixLen = conf.commonPrefix.size(); // whole prefix len
+	const size_t prefixNum = conf.nestLevel == int(curNestLevel)
+						   ? prefixLen/MAX_FRAG + (prefixLen%MAX_FRAG > 1)
+						   : 0;
+	if (prefixLen && conf.nestLevel == int(curNestLevel)) {
+		m_max_strlen += prefixLen;
+		fstring pref = conf.commonPrefix;
+		while (pref.size() >= MAX_FRAG) {
+			writePrefixFrag(pref.substr(0, MAX_FRAG));
+			pref = pref.substr(MAX_FRAG);
+		}
+		if (!pref.empty())
+			writePrefixFrag(pref);
+	}
+	bfsPutRoot();
+	auto patchNestStrVec = [&]() {
+		TERARK_VERIFY(nullptr == nestStrPoolFile); // NOLINT
+		if (0 == prefixNum)
+			return;
+		TERARK_VERIFY_EQ(nestStrVec.size(), nestStrVecSize);
+	  #if 0
+		// workaround: this code produce error on gcc-6.3, just disable it
+		// src/terark/fsa/nest_louds_trie.cpp:2284:5:
+		// internal compiler error: in maybe_undo_parenthesized_ref, at cp/semantics.c:1694
+		for (size_t i = 0; i < prefixNum; ++i) {
+			TERARK_VERIFY_LT(size_t(nestStrVec.m_index[i].seq_id), prefixNum);
+			TERARK_VERIFY_EZ(size_t(nestStrVec.m_index[i].offset));
+			TERARK_VERIFY_EZ(size_t(nestStrVec.m_index[i].length));
+		}
+	  #endif
+		sort_0(nestStrVec.m_index.begin(), prefixNum, TERARK_CMP(seq_id, <));
+		size_t strIncSize = prefixLen - (FastLabel ? ceiled_div(prefixLen, MAX_FRAG) : 0);
+		byte_t* data = nestStrVec.m_strpool.make_space_no_init(0, strIncSize);
+		fstring pref = conf.commonPrefix;
+		size_t offset = 0;
+		for (size_t i = 0; i < prefixNum; ++i) {
+			TERARK_VERIFY_EQ(size_t(nestStrVec.m_index[i].seq_id), i);
+			size_t cut = std::min(MAX_FRAG, pref.size());
+			size_t len = cut - (FastLabel ? 1 : 0);
+			memcpy(data + offset, pref.p + (FastLabel?1:0), len);
+			auto& x = nestStrVec.m_index[i];
+			x.offset = offset;
+			x.length = len;
+			offset += len;
+			pref = pref.substr(cut);
+		}
+		TERARK_VERIFY_LE(pref.size(), 1); // 1 or 0
+		TERARK_VERIFY_EQ(offset, strIncSize);
+		for (size_t i = prefixNum; i < nestStrVecSize; i++) {
+			nestStrVec.m_index[i].offset += strIncSize;
+		}
+	};
 	const byte_t* strBase = strVec.m_strpool.data();
 	while (!q1->empty()) {
 		while (!q1->empty()) {
@@ -2222,7 +2307,7 @@ build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
 								 childBegStr, parentBegCol, childBegCol);
 				}
 #if defined(USE_SUFFIX_ARRAY_TRIE)
-				else if (conf.saFragMinFreq) {
+				else if (conf.suffixTrie) {
 				//	size_t saMinFragLen = maxFragLen3;
 					size_t saMinFragLen = conf.minFragLen;
 				//	size_t saMinFragLen = 12;
@@ -2299,7 +2384,7 @@ build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
 					assert(childBegCol > parentBegCol);
 				}
 				size_t fragStrLen = childBegCol - parentBegCol;
-				assert(fragStrLen <= 253);
+				assert(fragStrLen <= MAX_FRAG);
 				if (FastLabel)
 					fragStrLen--;
 				if (fragStrLen >= minLinkStrLen) {
@@ -2316,6 +2401,8 @@ build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
 						nextKey.length = uint32_t(fragStrLen);
 						nextStrVecStore->push_back(nextKey);
 					}
+					size_t freq = childEndRow - childBegRow;
+					conf.isHiFreqFrag.push_back(freq >= fragStrLen);
 					if (FastLabel) {
 						labelStore->push_back(childBegStr[parentBegCol]);
 					} else {
@@ -2335,7 +2422,7 @@ build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
 						, childBegRow, childEndRow, childBegCol, childEndCol
 						);
 				assert(childBegRow < childEndRow);
-				// strVec.nth_size(childBegRow) may be expesive and this loop may be small
+				// strVec.nth_size(childBegRow) may be expensive and this loop may be small
 				if (childBegStr.size() == childBegCol) {
 					do {
 						size_t linked_node_id = m_is_link.size() - 1;
@@ -2343,17 +2430,17 @@ build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
 						if (linkSeqStore) {
 							linkSeqStore->oTmpBuf << LinkSeq(linked_node_id, seq_id);
 						} else {
-							assert(index_t(-1) == linkVec[seq_id]);
+							assert(size_t(-1) == linkVec[seq_id]);
 							linkVec[seq_id] = linked_node_id;
 						}
 						childBegRow++;
 					} while (childBegRow < childEndRow && strVec.nth_size(childBegRow) == childBegCol);
 				}
 #if !defined(NDEBUG)
-                for (size_t i = childBegRow; i < childEndRow; ++i) {
-                    fstring s = strVec[i];
-                    assert(s.size() > childBegCol);
-                }
+				for (size_t i = childBegRow; i < childEndRow; ++i) {
+					fstring s = strVec[i];
+					assert(s.size() > childBegCol);
+				}
 #endif
 				q2->push_back({childBegRow, childEndRow, childBegCol});
 				m_louds.push_back(true);
@@ -2386,10 +2473,10 @@ build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
 		std::swap(nestStrVec.m_strpool_mem_type, strVec.m_strpool_mem_type);
 	}
 	strVec.clear(); // free memory
-	std::unique_ptr<typename OnePassQueue<index_t>::InFile> linkVecStore;
+	std::unique_ptr<typename OnePassQueue<size_t>::InFile> linkVecStore;
 	if (!conf.tmpDir.empty() && realTmpLevel == 2) {
 		assert(!linkSeqStore);
-		linkVecStore.reset(new typename OnePassQueue<index_t>::InFile(conf.tmpDir, "linkVec-"));
+		linkVecStore.reset(new typename OnePassQueue<size_t>::InFile(conf.tmpDir, "linkVec-"));
 		linkVecStore->swap_out(&linkVec);
 	}
 if (nestStrPoolFile) {
@@ -2410,15 +2497,9 @@ else
 		THROW_STD(length_error
 			, "nextStrVec is too large, size = %zd", olvec.size());
 	}
-	auto pSEntry = (SortableStrVec::SEntry*)
-		realloc(olvec.data(), sizeof(SortableStrVec::SEntry) * olvec.size());
-	if (!pSEntry) {
-		fprintf(stderr
-			, "FATAL: %s:%d: realloc(%zd bytes) for nextStrVec failed\n"
-			, __FILE__, __LINE__
-			, sizeof(SortableStrVec::SEntry) * olvec.size());
-		throw std::bad_alloc();
-	}
+	using SEntry = SortableStrVec::SEntry;
+	auto pSEntry = (SEntry*)realloc(olvec.data(), sizeof(SEntry) * olvec.size());
+	TERARK_VERIFY_F(pSEntry != nullptr, "nextStrVec realloc(%zd)", olvec.size());
 	auto pOffsetLength = (SortableStrVec::OffsetLength*)pSEntry;
 	for (size_t i = olvec.size(); i > 0; ) {
 		auto ol = pOffsetLength[--i];
@@ -2430,6 +2511,7 @@ else
 	nestStrVec.m_index.risk_set_data(pSEntry, olvec.size());
 	olvec.risk_release_ownership();
 	nestStrVec.build_subkeys(conf.speedupNestTrieBuild);
+	patchNestStrVec();
 }
 //	m_total_zpath_len = nestStrVec.sync_real_str_size();
 	m_total_zpath_len = nestStrVec.str_size();
@@ -2445,9 +2527,9 @@ else
 #ifdef NDEBUG
 		linkVec.resize_no_init(strVecSize);
 #else
-		linkVec.resize_fill(strVecSize, index_t(-1));
+		linkVec.resize_fill(strVecSize, size_t(-1));
 #endif
-		index_t* lv = linkVec.data();
+		size_t* lv = linkVec.data();
 		for (size_t i = 0; i < strVecSize; ++i) {
 			LinkSeq ls;
 			linkSeqStore->iTmpBuf >> ls;
@@ -2469,7 +2551,7 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 build_core(SortableStrVec& strVec, valvec<byte_t>& label,
-           const NestLoudsTrieConfig& conf) {
+		   const NestLoudsTrieConfig& conf) {
 	if (strVec.size() == 0) {
 		return;
 	}
@@ -2487,7 +2569,7 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 build_core_no_reverse_keys(SortableStrVec& strVec, valvec<byte_t>& label,
-                           const NestLoudsTrieConfig& conf) {
+						   const NestLoudsTrieConfig& conf) {
 	int maxLen = 0, maxIdx = -1;
 	int minLen = INT_MAX;
 	for (int i = 0; i < (int)strVec.size(); ++i) {
@@ -2496,43 +2578,29 @@ build_core_no_reverse_keys(SortableStrVec& strVec, valvec<byte_t>& label,
 		minLen = std::min(minLen, (int)strVec.m_index[i].length);
 	}
 	minLen = std::min(255, minLen);
-	int lenBits = maxLen == minLen
-				? 0
-				: terark_bsr_u64(maxLen - minLen) + 1
-				;
+	int lenBits = UintVecMin0::compute_uintbits(maxLen - minLen); // can be 0
 	if (conf.debugLevel >= 2) {
 		fprintf(stderr, "build_core: cnt=%d poolsize=%d avg=%f\n"
 				, (int)strVec.size(), (int)strVec.str_size(), strVec.avg_size());
 		fprintf(stderr, "build_core: maxIdx=%d maxLen=%d minLen=%d lenBits=%d data: %.*s\n"
 				, maxIdx, maxLen, minLen, lenBits, maxLen, strVec.nth_data(maxIdx));
 	}
-    // this verify may fail if commonPrefix is set, disable it!
+	// this verify may fail if commonPrefix is set, disable it!
 	//TERARK_VERIFY_GE(strVec.m_strpool.size(), 3);
 	compress_core(strVec, conf);
-	typedef typename std::conditional<FastLabel,uint64_t,index_t>::type link_uint_t;
-	valvec<link_uint_t> linkVec(strVec.size(), valvec_no_init());
+	valvec<ullong> linkVec(strVec.size(), valvec_no_init());
 	for (size_t j = 0, k = 0; k < m_is_link.size(); ++k) {
 		if (m_is_link[k]) {
 			size_t offset = strVec.m_index[j].offset;
 			size_t keylen = strVec.m_index[j].length;
 		//	size_t seq_id = strVec.m_index[j].seq_id;
 		//	assert(seq_id == j);
-			long long val = (long long)(offset) << lenBits | (keylen - minLen);
-			if (sizeof(index_t) == 4 && (val >> 8) > UINT32_MAX) {
-				fprintf(stderr,
-					"FATAL: %s: lenBits=%d, (val >> 8) = 0x%llX\n"
-					"   Please try greater numTries!\n"
-					, BOOST_CURRENT_FUNCTION
-					, lenBits
-					, val >> 8
-					);
-				abort(); // can not continue
-			}
+			auto val = ullong(offset) << lenBits | ullong(keylen - minLen);
 			if (FastLabel) {
-				linkVec[j] = link_uint_t(val);
+				linkVec[j] = val;
 			} else {
 				label[k] = byte_t(val);
-				linkVec[j] = index_t(val >> 8);
+				linkVec[j] = val >> 8;
 			}
 			j++;
 		}
@@ -2552,8 +2620,8 @@ build_core_no_reverse_keys(SortableStrVec& strVec, valvec<byte_t>& label,
 template<class RankSelect, class RankSelect2, bool FastLabel>
 static void
 load_mmap_loop(NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>* trie,
-               size_t version,
-               NativeDataInput<MemIO>& mem, size_t trieNum, size_t i) {
+			   size_t version,
+			   NativeDataInput<MemIO>& mem, size_t trieNum, size_t i) {
 	typedef typename RankSelect::index_t index_t;
 	index_t nth_trie = 0, node_num = 0, core_size = 0;
 	uint08_t core_high_bits = 0, core_len_bits = 0;
@@ -2588,8 +2656,19 @@ load_mmap_loop(NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>* trie,
 		mem >> maxLinkVal;
 		trie->m_core_min_len = byte_t(minLen & 255);
 		trie->m_core_max_link_val = maxLinkVal;
-
-		mem.skip(16); // padding
+		if (version >= 2) {
+			trie->m_core_len_bits = mem.readByte();
+			if (sizeof(index_t) == 4) {
+				static_assert(sizeof(size_t) == 8);
+				uint16_t hi = 0; mem >> hi;
+				trie->m_core_max_link_val |= size_t(hi) << 32;
+				mem.skip(13); // padding is reduced from 15 to 13
+			} else {
+				mem.skip(15); // padding, change 16 to 15 for support common prefix
+			}
+		} else {
+			mem.skip(16);
+		}
 	}
 
 	trie->m_louds.risk_mmap_from(mem.skip(louds_mem_size), louds_mem_size);
@@ -2603,11 +2682,8 @@ load_mmap_loop(NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>* trie,
 		// nextState=nextNodeNum-1 must be a linked node
 		size_t max_link_val = trie->m_core_max_link_val + (nextNodeNum-1);
 		size_t LowBits = FastLabel ? 0 : 8;
-		size_t nextLinkBits
-			= (max_link_val - next_link_min_val) >> LowBits == 0
-			? 0
-			: 1 + terark_bsr_u64((max_link_val - next_link_min_val) >> LowBits)
-			;
+		size_t nextLinkBits = UintVecMin0::compute_uintbits
+					((max_link_val - next_link_min_val) >> LowBits);
 		trie->m_next_link.risk_set_data(
 			mem.skip((next_link_mem_size + 7) & ~7),
 			trie->m_is_link.max_rank1(),
@@ -2616,7 +2692,9 @@ load_mmap_loop(NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>* trie,
 		TERARK_VERIFY_EQ(trie->m_next_link.size(), trie->m_is_link.max_rank1());
 		trie->m_label_data = mem.skip((node_num + core_size + 7) & ~7);
 		trie->m_core_data = trie->m_label_data + node_num;
-		trie->m_core_len_bits = 1;
+		if (version == 1) {
+			trie->m_core_len_bits = 1;
+		}
 		trie->m_core_len_mask = (size_t(1) << trie->m_core_len_bits) - 1;
 	}
 	else {
@@ -2635,17 +2713,16 @@ load_mmap_loop(NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>* trie,
 		}
 		else {
 			// nextState=nextNodeNum-1 must be a linked node
-			size_t LowBits = FastLabel ? 0 : 8;
-			size_t nextLinkBits
-				= (nextNodeNum-1) >> LowBits == next_link_min_val
-				? 0
-				: 1 + terark_bsr_u64(((nextNodeNum-1)>>LowBits) - next_link_min_val)
-				;
-			trie->m_next_link.risk_set_data(
-				mem.skip((next_link_mem_size + 7) & ~7),
-				trie->m_is_link.max_rank1(),
-				size_t(next_link_min_val),
-				nextLinkBits);
+			if (nextNodeNum) {
+				size_t LowBits = FastLabel ? 0 : 8;
+				size_t nextLinkBits = UintVecMin0::compute_uintbits
+							(((nextNodeNum-1) >> LowBits) - next_link_min_val);
+				trie->m_next_link.risk_set_data(
+					mem.skip((next_link_mem_size + 7) & ~7),
+					trie->m_is_link.max_rank1(),
+					size_t(next_link_min_val),
+					nextLinkBits);
+			}
 			TERARK_VERIFY_EQ(trie->m_next_link.size(), trie->m_is_link.max_rank1());
 			trie->m_label_data = mem.skip((node_num + 7) & ~7);
 			trie->m_core_data = NULL;
@@ -2664,8 +2741,11 @@ load_mmap_loop(NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>* trie,
 template<class RankSelect, class RankSelect2, bool FastLabel>
 static void
 load_mmap_debug_check(NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>* trie,
-                      size_t trieNum, size_t i) {
+					  size_t trieNum, size_t i) {
 #if !defined(NDEBUG)
+	if (getEnvLong("NestLoudsTrie_debugLevel") < 2) {
+		return;
+	}
 	size_t next_node_num = trie->m_next_trie
 		? trie->m_next_trie->total_states()	: 0;
 	for (size_t j = 0; j < trie->m_is_link.size(); ++j) {
@@ -2725,13 +2805,13 @@ load_mmap(const void* data, size_t size) {
 		GetLastTrie_core_min_len(this) = coreMinLen;
 	}
 #if defined(TERARK_NLT_ENABLE_SEL0_CACHE)
-    m_sel0_cache.resize_no_init(m_louds.size() / 256);
-    uint32_t bitpos = m_louds.select0(0);
-    for (size_t i = 0; i < m_sel0_cache.size(); ++i) {
-        m_sel0_cache[i] = bitpos;
-        bitpos += m_louds.one_seq_len(bitpos+1) + 1;
-        assert(m_louds.is0(bitpos));
-    }
+	m_sel0_cache.resize_no_init(m_louds.size() / 256);
+	uint32_t bitpos = m_louds.select0(0);
+	for (size_t i = 0; i < m_sel0_cache.size(); ++i) {
+		m_sel0_cache[i] = bitpos;
+		bitpos += m_louds.one_seq_len(bitpos+1) + 1;
+		assert(m_louds.is0(bitpos));
+	}
 #endif
 }
 
@@ -2774,11 +2854,23 @@ save_mmap_loop(NativeDataOutput<AutoGrownMemIO>& tmpbuf,
 	tmpbuf << index_t(trie->m_next_link.mem_size());
 	tmpbuf << index_t(trie->m_next_link.min_val());
 	tmpbuf << trie->m_total_zpath_len;
-	if (version >= 1) {
-		const static byte_t zero[16] = { 0 };
+	{
+		// now version is 2
+		// arg version is actually not used in curr func
+		TERARK_VERIFY_EQ(version, 2);
+	  // change zero[16 to 15] for support common prefix
+		const static byte_t zero[15] = { 0 };
 		tmpbuf << index_t(trie->m_core_min_len);
 		tmpbuf << index_t(trie->m_core_max_link_val);
-		tmpbuf.ensureWrite(zero, sizeof(zero)); // padding
+		tmpbuf << byte_t(trie->m_core_len_bits); // add for common prefix support
+		if (sizeof(index_t) == 4) {
+			static_assert(sizeof(trie->m_core_max_link_val) == 8);
+			tmpbuf << uint16_t(trie->m_core_max_link_val >> 32);
+			tmpbuf.ensureWrite(zero, sizeof(zero)-2); // padding
+		}
+		else {
+			tmpbuf.ensureWrite(zero, sizeof(zero)); // padding
+		}
 	}
 	tmpbuf.ensureWrite(trie->m_louds.data(), trie->m_louds.mem_size());
 	tmpbuf.ensureWrite(trie->m_is_link.data(), trie->m_is_link.mem_size());
@@ -2804,6 +2896,7 @@ save_mmap_loop(NativeDataOutput<AutoGrownMemIO>& tmpbuf,
 		save_mmap_loop(tmpbuf, version, trie->m_next_trie, nth_trie+1, bPrintStat);
 }
 
+/*
 template<class Trie> static bool has_mixed(const Trie* trie) {
 	if (NULL == trie)
 		return false;
@@ -2811,22 +2904,24 @@ template<class Trie> static bool has_mixed(const Trie* trie) {
 		return true;
 	return has_mixed(trie->m_next_trie);
 }
+*/
+
 template<class RankSelect, class RankSelect2, bool FastLabel>
 static byte_t*
 save_mmap_s(const NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>* self,
-            size_t* pSize) {
+			size_t* pSize) {
 	NativeDataOutput<AutoGrownMemIO> tmpbuf;
-	tmpbuf.resize(8*1024);
+	tmpbuf.reserve(8*1024);
 	size_t trieNum = self->nest_level();
-	size_t version = 0;
-	if (has_mixed(self)) {
-		version = 1;
-	}
+	size_t version = 2; // now version always == 2
 	tmpbuf << uint32_t(trieNum);
 	tmpbuf << uint08_t(GetLastTrie_core_min_len(self));
 	tmpbuf << uint08_t(0); // padding
 	tmpbuf << uint08_t(0); // padding
 	tmpbuf << uint08_t(version);
+
+	// old program can not read new data since version 2,
+	// but version 2 program can read old data
 
 	bool bPrintStat = getEnvBool("LOUDS_DFA_PRINT_STAT");
 	save_mmap_loop(tmpbuf, version, self, 0, bPrintStat);

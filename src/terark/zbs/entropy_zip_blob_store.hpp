@@ -4,9 +4,6 @@
  *  Created on: 2019-05-28
  *      Author: zhaoming
  */
-
-#ifndef ZBS_ENTROPY_ZIP_BLOB_STORE_HPP_
-#define ZBS_ENTROPY_ZIP_BLOB_STORE_HPP_
 #pragma once
 
 #include "abstract_blob_store.hpp"
@@ -71,5 +68,3 @@ public:
 };
 
 } // namespace terark
-
-#endif /* ZBS_ENTROPY_ZIP_BLOB_STORE_HPP_ */

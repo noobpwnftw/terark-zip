@@ -34,7 +34,7 @@ rank_select_simple::rank_select_simple(const rank_select_simple& y)
     assert(y.m_capacity % WordBits == 0);
     reserve(y.m_capacity);
     m_size = y.m_size;
-    STDEXT_copy_n(y.m_words, y.m_capacity/WordBits, m_words);
+    std::copy_n(y.m_words, y.m_capacity/WordBits, m_words);
     if (y.m_rank_cache) {
         m_rank_cache = (uint32_t*)(m_words + num_words());
         m_max_rank0 = y.m_max_rank0;

@@ -4,9 +4,6 @@
  *  Created on: 2017年2月10日
  *      Author: leipeng
  */
-
-#ifndef ZBS_ZERO_LENGTH_BLOB_STORE_HPP_
-#define ZBS_ZERO_LENGTH_BLOB_STORE_HPP_
 #pragma once
 
 #include "abstract_blob_store.hpp"
@@ -43,5 +40,3 @@ public:
 };
 
 } // namespace terark
-
-#endif /* ZBS_ZERO_LENGTH_BLOB_STORE_HPP_ */

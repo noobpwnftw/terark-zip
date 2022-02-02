@@ -53,7 +53,7 @@ void MemIO::throw_OutOfSpace(const char* func, size_t want)
 
 //////////////////////////////////////////////////////////////////////////
 
-void SeekableMemIO::seek(ptrdiff_t newPos)
+void AutoGrownMemIO::seek(ptrdiff_t newPos)
 {
 	assert(newPos >= 0);
 	if (newPos < 0 || newPos > m_end - m_beg) {
@@ -67,7 +67,7 @@ void SeekableMemIO::seek(ptrdiff_t newPos)
 	m_pos = m_beg + newPos;
 }
 
-void SeekableMemIO::seek(ptrdiff_t offset, int origin)
+void AutoGrownMemIO::seek(ptrdiff_t offset, int origin)
 {
 	size_t pos;
 	switch (origin)
@@ -82,7 +82,7 @@ void SeekableMemIO::seek(ptrdiff_t offset, int origin)
 		}
 		case 0: pos = (size_t)(0 + offset); break;
 		case 1: pos = (size_t)(tell() + offset); break;
-		case 2: pos = (size_t)(size() + offset); break;
+		case 2: pos = (size_t)(capacity() + offset); break;
 	}
 	seek(pos);
 }
@@ -90,18 +90,18 @@ void SeekableMemIO::seek(ptrdiff_t offset, int origin)
 // rarely used methods....
 //
 
-std::pair<byte*, byte*> SeekableMemIO::range(size_t ibeg, size_t iend) const
+std::pair<byte*, byte*> AutoGrownMemIO::range(size_t ibeg, size_t iend) const
 {
 	assert(ibeg <= iend);
-	assert(ibeg <= size());
-	assert(iend <= size());
-	if (ibeg <= iend && ibeg <= size() && iend <= size())
+	assert(ibeg <= capacity());
+	assert(iend <= capacity());
+	if (ibeg <= iend && ibeg <= capacity() && iend <= capacity())
 	{
 		return std::pair<byte*, byte*>(m_beg + ibeg, m_beg + iend);
 	}
 	string_appender<> oss;
 	oss << BOOST_CURRENT_FUNCTION
-		<< ": size=" << size()
+		<< ": size=" << capacity()
 		<< ", tell=" << tell()
 		<< ", ibeg=" << ibeg
 		<< ", iend=" << iend
@@ -111,21 +111,12 @@ std::pair<byte*, byte*> SeekableMemIO::range(size_t ibeg, size_t iend) const
 
 //////////////////////////////////////////////////////////////////////////
 
-AutoGrownMemIO::AutoGrownMemIO(size_t size)
+AutoGrownMemIO::AutoGrownMemIO(size_t size) noexcept
 {
 	if (size) {
 		m_beg = (byte*)malloc(size);
 		if (NULL == m_beg) {
-#ifdef _MSC_VER_FUCK
-			char szMsg[128];
-			sprintf(szMsg
-				, "AutoGrownMemIO::AutoGrownMemIO(size=%lu)"
-				, (unsigned long)size
-				);
-			throw std::bad_alloc(szMsg);
-#else
-			throw std::bad_alloc();
-#endif
+			TERARK_DIE("size = %zd", size);
 		}
 		m_end = m_beg + size;
 		m_pos = m_beg;
@@ -140,10 +131,10 @@ AutoGrownMemIO::~AutoGrownMemIO()
 		free(m_beg);
 }
 
-void AutoGrownMemIO::clone(const AutoGrownMemIO& src)
+void AutoGrownMemIO::clone(const AutoGrownMemIO& src) noexcept
 {
-	AutoGrownMemIO t(src.size());
-	memcpy(t.begin(), src.begin(), src.size());
+	AutoGrownMemIO t(src.capacity());
+	memcpy(t.begin(), src.begin(), src.capacity());
 	this->swap(t);
 }
 
@@ -152,43 +143,33 @@ void AutoGrownMemIO::clone(const AutoGrownMemIO& src)
 
   不改变 buffer 中的已存内容，不改变 pos
 
- @note must m_pos <= newsize
+ @note must m_pos <= request_cap
  */
-void AutoGrownMemIO::resize(size_t newsize)
+void AutoGrownMemIO::reserve(size_t request_cap) noexcept
 {
-	assert(tell() <= newsize);
-	if (newsize < tell()) {
-		THROW_STD(length_error,
-			"newsize=%zd is less than tell()=%zd", newsize, tell());
+	size_t oldcap = capacity();
+	if (request_cap <= oldcap) {
+		return;
 	}
-
-#ifdef _MSC_VER
-	size_t oldsize = size();
-#endif
-	byte* newbeg = (byte*)realloc(m_beg, newsize);
+	size_t newcap = std::max(oldcap * 103/64, request_cap);
+	byte* newbeg = (byte*)realloc(m_beg, newcap);
 	if (newbeg) {
 		m_pos = newbeg + (m_pos - m_beg);
-		m_end = newbeg + newsize;
+		m_end = newbeg + newcap;
 		m_beg = newbeg;
 	}
 	else {
-#ifdef _MSC_VER_FUCK
-		string_appender<> oss;
-		oss << "realloc failed in \"void AutoGrownMemIO::resize(size[new=" << newsize << ", old=" << oldsize
-			<< "])\", the AutoGrownMemIO object is not mutated!";
-		throw std::bad_alloc(oss.str().c_str());
-#else
-		throw std::bad_alloc();
-#endif
+		TERARK_DIE("AutoGrownMemIO::reserve(request_cap = %zd), oldcap = %zd, realloc(newcap = %zd) failed",
+					request_cap, oldcap, newcap);
 	}
 }
 
-void AutoGrownMemIO::grow(size_t nGrow) {
-	size_t oldsize = m_end - m_beg;
-	size_t newsize = oldsize + nGrow;
-	size_t newcap = std::max<size_t>(32, oldsize);
-	while (newcap < newsize) newcap *= 2;
-	resize(newcap);
+void AutoGrownMemIO::grow_capacity(size_t nGrow) noexcept {
+	size_t oldcap = m_end - m_beg;
+	size_t request_cap = oldcap + nGrow;
+	size_t newcap = std::max<size_t>(32, oldcap);
+	while (newcap < request_cap) newcap *= 2;
+	reserve(newcap);
 }
 
 /**
@@ -197,54 +178,45 @@ void AutoGrownMemIO::grow(size_t nGrow) {
   相当于按新尺寸重新构造一个新 AutoGrownMemIO
   不需要把旧内容拷贝到新地址
  */
-void AutoGrownMemIO::init(size_t newsize)
+void AutoGrownMemIO::init(size_t newcap) noexcept
 {
-#ifdef _MSC_VER
-	size_t oldsize = (size_t)(m_beg - m_beg);
-#endif
+	size_t oldcap = (size_t)(m_beg - m_beg);
 	if (m_beg)
 		::free(m_beg);
-	if (newsize) {
-		m_beg = (byte*)::malloc(newsize);
+	if (newcap) {
+		m_beg = (byte*)::malloc(newcap);
 		if (NULL == m_beg) {
 			m_pos = m_end = NULL;
-	#ifdef _MSC_VER_FUCK
-			char szMsg[128];
-			sprintf(szMsg
-				, "malloc failed in AutoGrownMemIO::init(newsize=%lu), oldsize=%lu"
-				, (unsigned long)newsize
-				, (unsigned long)oldsize
+			TERARK_DIE("malloc failed in AutoGrownMemIO::init(newcap=%lu), oldcap=%lu"
+				, (unsigned long)newcap
+				, (unsigned long)oldcap
 				);
-			throw std::bad_alloc(szMsg);
-	#else
-			throw std::bad_alloc();
-	#endif
 		}
 		m_pos = m_beg;
-		m_end = m_beg + newsize;
+		m_end = m_beg + newcap;
 	}
 	else
 		m_pos = m_end = m_beg = NULL;
 }
 
-void AutoGrownMemIO::growAndWrite(const void* data, size_t length)
+void AutoGrownMemIO::growCapAndWrite(const void* data, size_t length) noexcept
 {
 	using namespace std;
-	size_t nSize = size();
+	size_t nSize = capacity();
 	size_t nGrow = max(length, nSize);
-	resize(max(nSize + nGrow, (size_t)64u));
+	reserve(max(nSize + nGrow, (size_t)64u));
 	memcpy(m_pos, data, length);
 	m_pos += length;
 }
 
-void AutoGrownMemIO::growAndWriteByte(byte b)
+void AutoGrownMemIO::growCapAndWriteByte(byte b) noexcept
 {
 	using namespace std;
-	resize(max(2u * size(), (size_t)64u));
+	reserve(max(2u * capacity(), (size_t)64u));
 	*m_pos++ = b;
 }
 
-void AutoGrownMemIO::clear() {
+void AutoGrownMemIO::clear() noexcept {
 	if (this->m_beg) {
 		::free(this->m_beg);
 		this->m_beg = NULL;
@@ -260,7 +232,7 @@ void AutoGrownMemIO::clear() {
 /**
  * shrink allocated memory to fit this->tell()
  */
-void AutoGrownMemIO::shrink_to_fit() {
+void AutoGrownMemIO::shrink_to_fit() noexcept {
 	if (NULL == m_beg) {
 		assert(NULL == m_pos);
 		assert(NULL == m_end);
@@ -286,7 +258,7 @@ void AutoGrownMemIO::shrink_to_fit() {
 	}
 }
 
-size_t AutoGrownMemIO::printf(const char* format, ...)
+size_t AutoGrownMemIO::printf(const char* format, ...) noexcept
 {
 	va_list ap;
 	size_t n;
@@ -296,10 +268,10 @@ size_t AutoGrownMemIO::printf(const char* format, ...)
 	return n;
 }
 
-size_t AutoGrownMemIO::vprintf(const char* format, va_list ap)
+size_t AutoGrownMemIO::vprintf(const char* format, va_list ap) noexcept
 {
 	if (m_end - m_pos < 64) {
-		this->resize(std::max<size_t>(64, (m_end-m_beg)*2));
+		this->reserve(std::max<size_t>(64, (m_end-m_beg)*2));
 	}
 	while (1) {
 		ptrdiff_t n, size = m_end - m_pos;
@@ -324,7 +296,7 @@ size_t AutoGrownMemIO::vprintf(const char* format, va_list ap)
 		else           /* glibc 2.0 */
 			size *= 2;  /* twice the old size */
 
-		this->resize((m_pos - m_beg + size) * 2);
+		this->reserve((m_pos - m_beg + size) * 2);
 	}
 }
 
@@ -347,7 +319,7 @@ AutoGrownMemIO_FILE_write(void *cookie, const char *buf, size_t size)
 }
 
 #if defined(__CYGWIN__)
-int AutoGrownMemIO_FILE_seek(void* cookie, _off64_t* offset, int whence)
+int AutoGrownMemIO_FILE_seek(void* cookie, off_t* offset, int whence)
 #else
 int AutoGrownMemIO_FILE_seek(void* cookie, off64_t* offset, int whence)
 #endif

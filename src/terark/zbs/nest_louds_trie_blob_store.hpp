@@ -1,5 +1,4 @@
-#ifndef __terark_nest_louds_trie_blob_store_hpp__
-#define __terark_nest_louds_trie_blob_store_hpp__
+#pragma once
 
 #include <terark/zbs/abstract_blob_store.hpp>
 #include <terark/fsa/nest_louds_trie.hpp>
@@ -103,6 +102,3 @@ typedef NestLoudsTrieBlobStore<NestLoudsTrie_Mixed_IL_256> NestLoudsTrieBlobStor
 typedef NestLoudsTrieBlobStore<NestLoudsTrie_Mixed_XL_256> NestLoudsTrieBlobStore_Mixed_XL_256;
 
 } // namespace terark
-
-#endif // __terark_nest_louds_trie_blob_store_hpp__
-

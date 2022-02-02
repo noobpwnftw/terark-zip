@@ -1,5 +1,4 @@
-#ifndef __terark_automata_nest_louds_trie_hpp__
-#define __terark_automata_nest_louds_trie_hpp__
+#pragma once
 
 #include <terark/fsa/x_fsa_util.hpp>
 #include <terark/fsa/fsa.hpp>
@@ -10,6 +9,18 @@
 #include <terark/util/zo_sorted_strvec.hpp>
 #include "dfa_algo_basic.hpp"
 #include "fsa_cache.hpp"
+
+//#define USE_SUFFIX_ARRAY_TRIE
+
+#if defined(USE_SUFFIX_ARRAY_TRIE)
+#include "suffix_array_trie.hpp"
+#include <zstd/dictBuilder/divsufsort.h>
+#else
+namespace terark {
+#define SuffixTrieCacheDFA DummySuffixTrieCacheDFA
+	class DummySuffixTrieCacheDFA {};
+}
+#endif
 
 namespace terark {
 
@@ -33,7 +44,11 @@ public:
 	mutable std::unique_ptr<class SuffixTrieCacheDFA> suffixTrie;
 	mutable uint16_t* bestZipLenArr;
 
+	std::string commonPrefix;
 	std::string tmpDir;
+
+	// indexed by nestStrVec[*].seq_id, these strings should be saved in core
+	mutable febitvec isHiFreqFrag;
 
 	/// taking effect only when tmpDir is not empty
 	/// 0: default, real tmpLevel is used in a smart way
@@ -81,21 +96,23 @@ public: // protected:
 	size_t        m_core_len_mask;
 	byte_t        m_core_len_bits;
 	byte_t        m_core_min_len;
+	uint32_t      m_max_strlen;
 	size_t        m_core_max_link_val;
 	uint64_t      m_total_zpath_len;
 	NestLoudsTrieTpl<RankSelect, RankSelect>* m_next_trie;
 	struct layer_ref_t {
 		index_t beg, end, mid;
 	};
+	struct layer_id_rank_t {
+		index_t id, rank;
+	};
 #if defined(TERARK_NLT_ENABLE_SEL0_CACHE)
     valvec<uint32_t>    m_sel0_cache;
 #endif
-	valvec<index_t>     m_layer_id;
-	valvec<index_t>     m_layer_rank;
+	valvec<layer_id_rank_t> m_layer_id_rank;
 	valvec<layer_ref_t> m_layer_ref;
 	uint32_t            m_max_layer_id;
 	uint32_t            m_max_layer_size;
-    uint32_t            m_max_strlen;
 
 public:
 	typedef RankSelect rank_select_t;
@@ -138,60 +155,60 @@ public:
         void reset(const BaseDFA*, size_t root = 0) override;
     };
     template<class Entry>
-    size_t initIterEntry(size_t parent, Entry*, byte_t* buf, size_t cap) const;
-    byte_t getFirstChar(size_t child0, size_t lcount) const;
-    byte_t getNthChar(size_t child0, size_t lcount, size_t nth) const;
-    byte_t getNthCharNext(size_t child0, size_t lcount, size_t nth, byte_t cch) const;
-    byte_t getNthCharPrev(size_t child0, size_t lcount, size_t nth, byte_t cch) const;
-	size_t getZpathFixed(size_t, byte_t* buf, size_t cap) const;
-    intptr_t matchZpath(size_t, const byte_t* str, size_t slen) const;
-	intptr_t matchZpath_loop(size_t, intptr_t, const byte_t* str, intptr_t slen) const;
+    size_t initIterEntry(size_t parent, Entry*, byte_t* buf, size_t cap) const noexcept;
+    byte_t getFirstChar(size_t child0, size_t lcount) const noexcept;
+    byte_t getNthChar(size_t child0, size_t lcount, size_t nth) const noexcept;
+    byte_t getNthCharNext(size_t child0, size_t lcount, size_t nth, byte_t cch) const noexcept;
+    byte_t getNthCharPrev(size_t child0, size_t lcount, size_t nth, byte_t cch) const noexcept;
+	size_t getZpathFixed(size_t, byte_t* buf, size_t cap) const noexcept;
+    intptr_t matchZpath(size_t, const byte_t* str, size_t slen) const noexcept;
+	intptr_t matchZpath_loop(size_t, intptr_t, const byte_t* str, intptr_t slen) const noexcept;
 
 	NestLoudsTrieTpl();
 	NestLoudsTrieTpl(const NestLoudsTrieTpl&);
 	NestLoudsTrieTpl& operator=(const NestLoudsTrieTpl&);
 	~NestLoudsTrieTpl();
 
-	void risk_release_ownership();
-	void swap(NestLoudsTrieTpl&);
+	void risk_release_ownership() noexcept;
+	void swap(NestLoudsTrieTpl&) noexcept;
 
 	size_t total_states() const { return m_is_link.size(); }
-	size_t mem_size() const;
-	size_t nest_level() const;
-	size_t core_mem_size() const;
+	size_t mem_size() const noexcept;
+	size_t nest_level() const noexcept;
+	size_t core_mem_size() const noexcept;
 
-	size_t get_parent(size_t child) const;
-	uint64_t get_link_val(size_t node_id) const;
-	fstring get_core_str(size_t node_id) const;
+	size_t get_parent(size_t child) const noexcept;
+	uint64_t get_link_val(size_t node_id) const noexcept;
+	fstring get_core_str(size_t node_id) const noexcept;
 
-	void restore_string_append(size_t node_id, valvec<byte_t>* str) const;
-	void restore_string_append(size_t node_id, std::string   * str) const;
+	void restore_string_append(size_t node_id, valvec<byte_t>* str) const noexcept;
+	void restore_string_append(size_t node_id, std::string   * str) const noexcept;
 
-	void restore_dawg_string_append(size_t node_id, valvec<byte_t>* str) const;
-	void restore_dawg_string_append(size_t node_id, std::string   * str) const;
+	void restore_dawg_string_append(size_t node_id, valvec<byte_t>* str) const noexcept;
+	void restore_dawg_string_append(size_t node_id, std::string   * str) const noexcept;
 
-	void restore_string(size_t node_id, valvec<byte_t>* str) const;
-	void restore_dawg_string(size_t node_id, valvec<byte_t>* str) const;
-	void restore_next_string(size_t node_id, valvec<byte_t>* str) const;
-	void restore_string_loop(size_t node_id, valvec<byte_t>* str) const;
+	void restore_string(size_t node_id, valvec<byte_t>* str) const noexcept;
+	void restore_dawg_string(size_t node_id, valvec<byte_t>* str) const noexcept;
+	void restore_next_string(size_t node_id, valvec<byte_t>* str) const noexcept;
+	void restore_string_loop(size_t node_id, valvec<byte_t>* str) const noexcept;
 
-	void restore_string(size_t node_id, std::string* str) const;
-	void restore_dawg_string(size_t node_id, std::string* str) const;
-	void restore_next_string(size_t node_id, std::string* str) const;
-	void restore_string_loop(size_t node_id, std::string* str) const;
+	void restore_string(size_t node_id, std::string* str) const noexcept;
+	void restore_dawg_string(size_t node_id, std::string* str) const noexcept;
+	void restore_next_string(size_t node_id, std::string* str) const noexcept;
+	void restore_string_loop(size_t node_id, std::string* str) const noexcept;
 
-	void build_strpool(SortableStrVec&, valvec<index_t>& idvec, const NestLoudsTrieConfig&);
-	void build_strpool2(SortableStrVec& strVec, valvec<index_t>& linkVec, const NestLoudsTrieConfig& conf);
-	void build_patricia(SortableStrVec&, function<void(const valvec<index_t>& linkVec)> buildTerm, const NestLoudsTrieConfig&);
-	void build_patricia(SortThinStrVec&, function<void(const valvec<index_t>& linkVec)> buildTerm, const NestLoudsTrieConfig&);
-	void build_patricia(FixedLenStrVec&, function<void(const valvec<index_t>& linkVec)> buildTerm, const NestLoudsTrieConfig&);
-	void build_patricia(VoSortedStrVec&, function<void(const valvec<index_t>& linkVec)> buildTerm, const NestLoudsTrieConfig&);
-	void build_patricia(DoSortedStrVec&, function<void(const valvec<index_t>& linkVec)> buildTerm, const NestLoudsTrieConfig&);
-	void build_patricia(QoSortedStrVec&, function<void(const valvec<index_t>& linkVec)> buildTerm, const NestLoudsTrieConfig&);
-	void build_patricia(ZoSortedStrVec&, function<void(const valvec<index_t>& linkVec)> buildTerm, const NestLoudsTrieConfig&);
+	void build_strpool(SortableStrVec&, valvec<size_t>& idvec, const NestLoudsTrieConfig&);
+	void build_strpool2(SortableStrVec& strVec, valvec<size_t>& linkVec, const NestLoudsTrieConfig& conf);
+	void build_patricia(SortableStrVec&, function<void(const valvec<size_t>& linkVec)> buildTerm, const NestLoudsTrieConfig&);
+	void build_patricia(SortThinStrVec&, function<void(const valvec<size_t>& linkVec)> buildTerm, const NestLoudsTrieConfig&);
+	void build_patricia(FixedLenStrVec&, function<void(const valvec<size_t>& linkVec)> buildTerm, const NestLoudsTrieConfig&);
+	void build_patricia(VoSortedStrVec&, function<void(const valvec<size_t>& linkVec)> buildTerm, const NestLoudsTrieConfig&);
+	void build_patricia(DoSortedStrVec&, function<void(const valvec<size_t>& linkVec)> buildTerm, const NestLoudsTrieConfig&);
+	void build_patricia(QoSortedStrVec&, function<void(const valvec<size_t>& linkVec)> buildTerm, const NestLoudsTrieConfig&);
+	void build_patricia(ZoSortedStrVec&, function<void(const valvec<size_t>& linkVec)> buildTerm, const NestLoudsTrieConfig&);
 
     template<class StrVecType>
-    void build_patricia_tpl(StrVecType&, function<void(const valvec<index_t>& linkVec)> buildTerm, const NestLoudsTrieConfig&);
+    void build_patricia_tpl(StrVecType&, function<void(const valvec<size_t>& linkVec)> buildTerm, const NestLoudsTrieConfig&);
 
 	void load_mmap(const void* data, size_t size);
 	byte_t* save_mmap(size_t* pSize) const;
@@ -205,11 +222,11 @@ public:
 	void str_stat(std::string* ) const;
 
 public: // protected:
-	void build_strpool_loop(SortableStrVec&, valvec<index_t>& linkVec, size_t curNestLevel, const NestLoudsTrieConfig&);
-	void build_link(valvec<index_t>& nextLinkVec, valvec<byte_t>& label);
-	void build_self_trie(SortableStrVec&, valvec<index_t>& linkVec, valvec<byte_t>& label, size_t curNestLevel, const NestLoudsTrieConfig&);
+	void build_strpool_loop(SortableStrVec&, valvec<size_t>& linkVec, size_t curNestLevel, const NestLoudsTrieConfig&);
+	void build_link(valvec<size_t>& nextLinkVec, valvec<byte_t>& label);
+	void build_self_trie(SortableStrVec&, valvec<size_t>& linkVec, valvec<byte_t>& label, size_t curNestLevel, const NestLoudsTrieConfig&);
 	template<class StrVecType>
-	void build_self_trie_tpl(StrVecType&, SortableStrVec&, valvec<index_t>& linkVec, valvec<byte_t>& label, size_t curNestLevel, const NestLoudsTrieConfig&);
+	void build_self_trie_tpl(StrVecType&, SortableStrVec&, valvec<size_t>& linkVec, valvec<byte_t>& label, size_t curNestLevel, const NestLoudsTrieConfig&);
 	void build_core(SortableStrVec& strVec, valvec<byte_t>& label, const NestLoudsTrieConfig&);
 	void build_core_no_reverse_keys(SortableStrVec& strVec, valvec<byte_t>& label, const NestLoudsTrieConfig&);
 	void build_mixed(SortableStrVec& strVec, valvec<byte_t>& label, size_t curNestLevel, const NestLoudsTrieConfig&);
@@ -218,31 +235,31 @@ public: // protected:
 	void debug_equal_check(const NestLoudsTrieTpl&) const;
 
 	template<class StrBuf>
-	void tpl_restore_string_append(size_t node_id, StrBuf* str) const;
+	void tpl_restore_string_append(size_t node_id, StrBuf* str) const noexcept;
 	template<class StrBuf>
-	void tpl_restore_dawg_string_append(size_t node_id, StrBuf* str) const;
+	void tpl_restore_dawg_string_append(size_t node_id, StrBuf* str) const noexcept;
 	template<class StrBuf>
-	void tpl_restore_next_string(size_t node_id, StrBuf* str) const;
+	void tpl_restore_next_string(size_t node_id, StrBuf* str) const noexcept;
 	template<class StrBuf>
-	void tpl_restore_string_loop(size_t node_id, StrBuf* str) const;
+	void tpl_restore_string_loop(size_t node_id, StrBuf* str) const noexcept;
 	template<class StrBuf>
-	void tpl_restore_string_loop_ex(size_t node_id, StrBuf* str, bool reverse) const;
+	void tpl_restore_string_loop_ex(size_t node_id, StrBuf* str, bool reverse) const noexcept;
 
-	byte_t label_first_byte(size_t node_id) const;
+	byte_t label_first_byte(size_t node_id) const noexcept;
 
 public:
 	static const size_t nil_state = size_t(-1);
 	static const size_t max_state = size_t(-2);
 
-	fstring get_zpath_data(size_t, MatchContext*) const;
+	fstring get_zpath_data(size_t, MatchContext*) const noexcept;
 
     bool is_pzip(size_t s) const {
         assert(s < m_is_link.size());
         return m_is_link[s];
     }
-	bool   has_children(size_t) const;
-	size_t num_children(size_t) const;
-	size_t gnode_states() const;
+	bool   has_children(size_t) const noexcept;
+	size_t num_children(size_t) const noexcept;
+	size_t gnode_states() const noexcept;
 	size_t num_zpath_states() const { return m_is_link.max_rank1(); }
 	uint64_t total_zpath_len() const { return m_total_zpath_len; }
 
@@ -250,19 +267,19 @@ public:
 		size_t n_children;
 		size_t child0;
 	};
-	size_t state_move(size_t, auchar_t ch) const;
-    std::pair<size_t, bool> state_move_lower_bound(size_t, auchar_t ch) const;
-	size_t state_move_slow(size_t, auchar_t ch, StateMoveContext& ctx) const;
-	size_t state_move_fast(size_t, auchar_t ch, size_t n_children, size_t child0) const;
-	size_t state_move_fast(size_t parent, auchar_t ch, const StateMoveContext& ctx) const {
+	size_t state_move(size_t, auchar_t ch) const noexcept;
+    std::pair<size_t, bool> state_move_lower_bound(size_t, auchar_t ch) const noexcept;
+	size_t state_move_slow(size_t, auchar_t ch, StateMoveContext& ctx) const noexcept;
+	size_t state_move_fast(size_t, auchar_t ch, size_t n_children, size_t child0) const noexcept;
+	size_t state_move_fast(size_t parent, auchar_t ch, const StateMoveContext& ctx) const noexcept {
 		return state_move_fast(parent, ch, ctx.n_children, ctx.child0);
 	}
     template<class LoudsBits, class LoudsSel, class LoudsRank>
     size_t state_move_fast2(size_t parent, byte_t ch, const byte_t* label,
-                            const LoudsBits*, const LoudsSel* sel0, const LoudsRank*) const;
+                            const LoudsBits*, const LoudsSel* sel0, const LoudsRank*) const noexcept;
 
     template<bool HasLink>
-    size_t state_move_smart(size_t s, auchar_t ch) const {
+    size_t state_move_smart(size_t s, auchar_t ch) const noexcept {
         if (HasLink || FastLabel)
             return state_move(s, ch);
         else
@@ -270,36 +287,36 @@ public:
     }
     template<bool HasLink>
     std::pair<size_t, bool>
-    state_move_lower_bound_smart(size_t s, auchar_t ch) const {
+    state_move_lower_bound_smart(size_t s, auchar_t ch) const noexcept {
         if (HasLink || FastLabel)
             return state_move_lower_bound(s, ch);
         else
             return state_move_lower_bound_no_link(s, ch);
     }
 private:
-    size_t state_move_no_link(size_t, auchar_t ch) const;
+    size_t state_move_no_link(size_t, auchar_t ch) const noexcept;
     std::pair<size_t, bool>
-    state_move_lower_bound_no_link(size_t, auchar_t ch) const;
+    state_move_lower_bound_no_link(size_t, auchar_t ch) const noexcept;
 
 public:
     template<class RankSelectTerm>
-    void lower_bound(MatchContext& ctx, fstring word, size_t* index, size_t* dict_rank, const NTD_CacheTrie* cache, const RankSelectTerm& is_term) const;
+    void lower_bound(MatchContext& ctx, fstring word, size_t* index, size_t* dict_rank, const NTD_CacheTrie* cache, const RankSelectTerm& is_term) const noexcept;
     template<class RankSelectTerm, bool HasLink, bool HasDictRank>
-    void lower_bound_impl(MatchContext& ctx, fstring word, size_t* index, size_t* dict_rank, const NTD_CacheTrie* cache, const RankSelectTerm& is_term) const;
+    void lower_bound_impl(MatchContext& ctx, fstring word, size_t* index, size_t* dict_rank, const NTD_CacheTrie* cache, const RankSelectTerm& is_term) const noexcept;
 
     template<class RankSelectTerm>
-    size_t state_begin(const RankSelectTerm& is_term) const;
+    size_t state_begin(const RankSelectTerm& is_term) const noexcept;
     template<class RankSelectTerm>
-    size_t state_end(const RankSelectTerm& is_term) const;
+    size_t state_end(const RankSelectTerm& is_term) const noexcept;
     template<class RankSelectTerm>
-    size_t state_next(size_t state, const RankSelectTerm& is_term) const;
+    size_t state_next(size_t state, const RankSelectTerm& is_term) const noexcept;
     template<class RankSelectTerm>
-    size_t state_prev(size_t state, const RankSelectTerm& is_term) const;
+    size_t state_prev(size_t state, const RankSelectTerm& is_term) const noexcept;
 
     template<class RankSelectTerm>
-    size_t state_to_dict_rank(size_t state, const RankSelectTerm& is_term) const;
+    size_t state_to_dict_rank(size_t state, const RankSelectTerm& is_term) const noexcept;
     template<class RankSelectTerm>
-    size_t dict_rank_to_state(size_t rank, const RankSelectTerm& is_term) const;
+    size_t dict_rank_to_state(size_t rank, const RankSelectTerm& is_term) const noexcept;
 
 	template<class OP>
 	void for_each_move(size_t parent, OP op) const {
@@ -421,6 +438,3 @@ TERARK_NAME_TYPE(NestLoudsTrie_Mixed_XL_256_32_41_FL, NestLoudsTrieTpl<rank_sele
 */
 
 } // namespace terark
-
-#endif // __terark_automata_nest_louds_trie_hpp__
-

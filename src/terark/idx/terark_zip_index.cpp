@@ -2304,10 +2304,7 @@ struct IndexCBTPrefix : public VirtualPrefixBase {
     }
     bounds_.erase_all();
 
-    if (!cbt_packed.load(mem)) {
-        return false;
-    }
-
+    cbt_packed.load(mem);
     auto ctx = GetTlsTerarkContext();
     ContextBuffer suffix_key = ctx->alloc();
     for (size_t i = 0; i < cbt_packed.trie_nums(); ++i) {
@@ -3274,10 +3271,6 @@ SuffixBase *BuildDictZipSuffix(InputBufferType &input, size_t numKeys,
   return new IndexBlobStoreSuffix<DictZipBlobStore>(static_cast<DictZipBlobStore*>(store), memory, isReverse);
 }
 
-bool UseRawSuffix(size_t numKeys, size_t sumKeyLen, double zipRatio) {
-  return !UseEntropySuffix(numKeys, sumKeyLen, zipRatio) && !UseEntropySuffix(numKeys, sumKeyLen, zipRatio);
-}
-
 template <class InputBufferType>
 SuffixBase *BuildSuffixAutoSelect(InputBufferType &input, size_t numKeys,
                                   size_t sumKeyLen, bool isFixedLen,
@@ -3393,6 +3386,7 @@ PrefixBuildInfo TerarkIndex::GetPrefixBuildInfo(const TerarkIndexOptions& opt, c
       info.type = PrefixAlgo::asc_allone;
       prefixCost = 0;
     } else if (useFewOne) {
+      assert(bit_count > 0);
       /*****/if (bit_count < (1ULL << 24)) {
         info.type = info.entry_count == keyCount ? PrefixAlgo::asc_few_one_3 : PrefixAlgo::non_desc_few_one_3;
       } else if (bit_count < (1ULL << 32)) {
@@ -3408,6 +3402,7 @@ PrefixBuildInfo TerarkIndex::GetPrefixBuildInfo(const TerarkIndexOptions& opt, c
       }
       prefixCost = info.bit_count1 * i * 256 / 255;
     } else if (useFewZero) {
+      assert(bit_count > 0);
       assert(info.entry_count == keyCount);
       /*****/if (bit_count < (1ULL << 24)) {
         info.type = PrefixAlgo::asc_few_zero_3;

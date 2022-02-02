@@ -235,7 +235,7 @@ public:
     void swap(RevOrdStrVecUintTpl&);
     void push_back(fstring str);
     void pop_back();
-	void back_grow_no_init(size_t nGrow);
+    void back_grow_no_init(size_t nGrow);
     void reverse_keys();
     void sort();
     void clear();

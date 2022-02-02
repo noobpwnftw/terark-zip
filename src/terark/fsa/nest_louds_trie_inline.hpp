@@ -8,6 +8,7 @@ namespace terark {
 template<class NLTrie>
 inline byte_t
 NestLoudsTrie_label_first_byte_nested(const NLTrie* trie, size_t node_id)
+noexcept
 {
 	assert(NULL != trie);
 //  trie->m_is_link.prefetch_rank1(node_id);
@@ -37,7 +38,7 @@ NestLoudsTrie_label_first_byte_nested(const NLTrie* trie, size_t node_id)
 template<class RankSelect, class RankSelect2, bool FastLabel>
 byte_t
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::label_first_byte(size_t node_id)
-const {
+const noexcept {
 	assert(!FastLabel);
 	assert(node_id > 0);
 	assert(node_id < m_is_link.size());
@@ -68,7 +69,7 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 terark_flatten
 size_t NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 state_move(size_t parent, auchar_t ch)
-const {
+const noexcept {
     assert(ch < 256);
     assert(parent < total_states());
 #if !defined(TERARK_NLT_ENABLE_SEL0_CACHE)
@@ -93,7 +94,7 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 std::pair<size_t, bool>
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 state_move_lower_bound(size_t parent, auchar_t ch)
-const {
+const noexcept {
     assert(ch < 256);
     assert(parent < total_states());
 #if !defined(TERARK_NLT_ENABLE_SEL0_CACHE)
@@ -155,7 +156,7 @@ const {
 template<class RankSelect, class RankSelect2, bool FastLabel>
 size_t NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 state_move_fast(size_t parent, auchar_t ch, size_t lcount, size_t child0)
-const {
+const noexcept {
 	assert(ch < 256);
 	assert(parent < total_states());
 //	assert(lcount > 0); // lcount == 0 is valid
@@ -163,6 +164,13 @@ const {
 	if (FastLabel) {
         const byte_t* label = m_label_data + child0;
         if (lcount < 36) {
+          #if defined(__AVX512VL__) && defined(__AVX512BW__)
+            size_t i = fast_search_byte_max_35(label, lcount, ch);
+            if (i < lcount) // not need check label[i] == ch
+                return child0 + i;
+            else
+                return nil_state;
+          #endif
             if (true/* && lcount <= 16*/) {
                 if (lcount && ch <= label[lcount-1]) {
                     size_t i = size_t(-1);
@@ -185,8 +193,8 @@ const {
                 return child0 + i;
             }
 #else
-            unsigned i = ch / TERARK_WORD_BITS;
-            unsigned j = ch % TERARK_WORD_BITS;
+            size_t i = ch / TERARK_WORD_BITS;
+            size_t j = ch % TERARK_WORD_BITS;
             size_t w = unaligned_load<size_t>(label + 4 + i*sizeof(size_t));
             if ((w >> j) & 1)
                 return child0 + label[i] + fast_popcount_trail(w, j);
@@ -217,7 +225,7 @@ template<class LoudsBits, class LoudsSel, class LoudsRank>
 size_t NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 state_move_fast2(size_t parent, byte_t ch, const byte_t* label,
                  const LoudsBits* bits, const LoudsSel* sel0, const LoudsRank* rank)
-const {
+const noexcept {
     assert(ch < 256);
     assert(parent < total_states());
 #if !defined(TERARK_NLT_ENABLE_SEL0_CACHE)
@@ -234,12 +242,16 @@ const {
     _mm_prefetch((const char*)label, _MM_HINT_T0);
     m_is_link.prefetch_bit(child0); // prefetch for next search
     size_t lcount = RankSelect::fast_one_seq_len(bits, bitpos+1);
-    if (terark_unlikely(0 == lcount)) {
-        return nil_state;
-    }
     assert(child0 + lcount <= total_states());
     if (FastLabel) {
         if (lcount < 36) {
+          #if defined(__AVX512VL__) && defined(__AVX512BW__)
+            size_t i = fast_search_byte_max_35(label, lcount, ch);
+            if (i < lcount) // not need check label[i] == ch
+                return child0 + i;
+            else
+                return nil_state;
+          #endif
             if (true/* && lcount <= 16*/) {
                 if (lcount && ch <= label[lcount-1]) {
                     size_t i = size_t(-1);
@@ -262,8 +274,8 @@ const {
                 return child0 + i;
             }
 #else
-            unsigned i = ch / TERARK_WORD_BITS;
-            unsigned j = ch % TERARK_WORD_BITS;
+            size_t i = ch / TERARK_WORD_BITS;
+            size_t j = ch % TERARK_WORD_BITS;
             size_t w = unaligned_load<size_t>(label + 4 + i*sizeof(size_t));
             if ((w >> j) & 1)
                 return child0 + label[i] + fast_popcount_trail(w, j);
@@ -319,7 +331,7 @@ const {
 template<class RankSelect, class RankSelect2, bool FastLabel>
 terark_flatten
 size_t NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-state_move_slow(size_t parent, auchar_t ch, StateMoveContext& ctx) const {
+state_move_slow(size_t parent, auchar_t ch, StateMoveContext& ctx) const noexcept {
     assert(ch < 256);
     assert(parent < total_states());
 #if !defined(TERARK_NLT_ENABLE_SEL0_CACHE)
@@ -351,7 +363,7 @@ state_move_slow(size_t parent, auchar_t ch, StateMoveContext& ctx) const {
 template<class RankSelect, class RankSelect2, bool FastLabel>
 terark_flatten
 size_t NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-state_move_no_link(size_t parent, auchar_t ch) const {
+state_move_no_link(size_t parent, auchar_t ch) const noexcept {
     assert(!FastLabel);
     assert(ch < 256);
     assert(parent < total_states());
@@ -383,7 +395,7 @@ state_move_no_link(size_t parent, auchar_t ch) const {
 template<class RankSelect, class RankSelect2, bool FastLabel>
 std::pair<size_t, bool>
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-state_move_lower_bound_no_link(size_t parent, auchar_t ch) const {
+state_move_lower_bound_no_link(size_t parent, auchar_t ch) const noexcept {
     assert(!FastLabel);
     assert(ch < 256);
     assert(parent < total_states());
@@ -419,24 +431,22 @@ void NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 init_for_term(const RankSelectTerm& is_term) {
     index_t pos = 2, id = 0, rank = 0;
     while (true) {
-        m_layer_id.emplace_back(id);
-        m_layer_rank.emplace_back(rank);
+        m_layer_id_rank.push_back({id, rank});
         if ((id = pos - id - 1) >= m_louds.max_rank1())
             break;
         pos = m_louds.select0(id) + 1;
         rank = is_term.rank1(id);
     }
-    assert(id == m_louds.max_rank1());
-    assert(m_layer_id.size() == m_layer_rank.size());
+    TERARK_VERIFY_EQ(id, m_louds.max_rank1());
 
-    index_t layer_max = m_layer_id.size();
+    index_t layer_max = m_layer_id_rank.size();
     m_layer_ref.resize_no_init(layer_max);
     index_t layer_id = 0, layer_size = 0;
     for (index_t i = 0; i < layer_max; ++i) {
         index_t end_id = i == layer_max - 1
-                       ? (index_t)is_term.size() : m_layer_id[i + 1];
-        m_layer_ref[i] = layer_ref_t{m_layer_id[i], end_id, 0};
-        index_t size = end_id - m_layer_id[i];
+                       ? (index_t)is_term.size() : m_layer_id_rank[i + 1].id;
+        m_layer_ref[i] = layer_ref_t{m_layer_id_rank[i].id, end_id, 0};
+        index_t size = end_id - m_layer_id_rank[i].id;
         if (size > layer_size) {
             layer_id = i;
             layer_size = size;
@@ -450,7 +460,7 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 template<class RankSelectTerm>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-lower_bound(MatchContext& ctx, fstring word, size_t* index, size_t* dict_rank, const NTD_CacheTrie* cache, const RankSelectTerm& is_term) const {
+lower_bound(MatchContext& ctx, fstring word, size_t* index, size_t* dict_rank, const NTD_CacheTrie* cache, const RankSelectTerm& is_term) const noexcept {
     if (m_is_link.max_rank1() > 0) {
         if (dict_rank)
             lower_bound_impl<RankSelectTerm, true, true>(ctx, word, index, dict_rank, cache, is_term);
@@ -469,7 +479,7 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 template<class RankSelectTerm, bool HasLink, bool HasDictRank>
 void
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-lower_bound_impl(MatchContext& ctx, fstring word, size_t* index, size_t* dict_rank, const NTD_CacheTrie* cache, const RankSelectTerm& is_term) const {
+lower_bound_impl(MatchContext& ctx, fstring word, size_t* index, size_t* dict_rank, const NTD_CacheTrie* cache, const RankSelectTerm& is_term) const noexcept {
     assert(HasLink == (m_is_link.max_rank1() > 0));
     auto trie = this;
     //	assert(0 == ctx.bit_pos);
@@ -477,19 +487,17 @@ lower_bound_impl(MatchContext& ctx, fstring word, size_t* index, size_t* dict_ra
     size_t curr = ctx.root;
     size_t i = ctx.pos;
     size_t j = ctx.zidx;
-    size_t layer_max = m_layer_id.size();
     size_t layer = 0;
     size_t rank = 0;
     if (curr != initial_state) {
         if (HasDictRank) {
-            layer = upper_bound_0(m_layer_id.data(), layer_max, curr) - 1;
-            assert(layer < layer_max);
+            layer = upper_bound_ex_a(m_layer_id_rank, curr, TERARK_FIELD(id)) - 1;
         }
         size_t parent = curr;
         size_t parent_layer = layer;
         do {
             --parent_layer;
-            rank += is_term.rank1(parent + 1) - m_layer_rank[parent_layer];
+            rank += is_term.rank1(parent + 1) - m_layer_id_rank[parent_layer].rank;
             parent = m_louds.select1(parent) - parent - 1;
         } while (parent != initial_state);
     }
@@ -507,13 +515,14 @@ lower_bound_impl(MatchContext& ctx, fstring word, size_t* index, size_t* dict_ra
         }
         if (HasDictRank) {
             assert(dict_rank != nullptr);
+            size_t layer_max = m_layer_id_rank.size();
             for (++layer; layer < layer_max; ++layer) {
                 state = m_louds.select0(state) - state;
                 assert(state <= is_term.size());
-                if (state == m_layer_id[layer])
+                if (state == m_layer_id_rank[layer].id)
                     break;
-                assert(state > m_layer_id[layer]);
-                rank += is_term.rank1(state) - m_layer_rank[layer];
+                assert(state > m_layer_id_rank[layer].id);
+                rank += is_term.rank1(state) - m_layer_id_rank[layer].rank;
             }
             assert(rank >= 1 || !dec);
             *dict_rank = rank - dec;
@@ -550,7 +559,7 @@ lower_bound_impl(MatchContext& ctx, fstring word, size_t* index, size_t* dict_ra
                 curr = child;
                 ++layer;
                 if (HasDictRank)
-                    rank += is_term.rank1(da[child].m_map_state + 1) - m_layer_rank[layer];
+                    rank += is_term.rank1(da[child].m_map_state + 1) - m_layer_id_rank[layer].rank;
                 i++;
             }
             else {
@@ -561,7 +570,7 @@ lower_bound_impl(MatchContext& ctx, fstring word, size_t* index, size_t* dict_ra
                     curr = mr.first;
                     ++layer;
                     if (HasDictRank)
-                        rank += is_term.rank1(curr + 1) - m_layer_rank[layer];
+                        rank += is_term.rank1(curr + 1) - m_layer_id_rank[layer].rank;
                     i++;
                     break;
                 }
@@ -569,14 +578,14 @@ lower_bound_impl(MatchContext& ctx, fstring word, size_t* index, size_t* dict_ra
                     return trans_state(map_state, false);
                 ++layer;
                 if (HasDictRank)
-                    rank += is_term.rank1(mr.first) - m_layer_rank[layer];
+                    rank += is_term.rank1(mr.first) - m_layer_id_rank[layer].rank;
                 return trans_state(mr.first, false);
             }
         }
     }
     else {
         if (HasDictRank)
-            rank += is_term.rank1(1) - m_layer_rank[0];
+            rank += is_term.rank1(1) - m_layer_id_rank[0].rank;
     }
     assert(nil_state != curr);
     while(true) {
@@ -609,13 +618,13 @@ lower_bound_impl(MatchContext& ctx, fstring word, size_t* index, size_t* dict_ra
                 return trans_state(curr, false);
             ++layer;
             if (HasDictRank)
-                rank += is_term.rank1(mr.first) - m_layer_rank[layer];
+                rank += is_term.rank1(mr.first) - m_layer_id_rank[layer].rank;
             return trans_state(mr.first, false);
         }
         curr = mr.first;
         ++layer;
         if (HasDictRank)
-            rank += is_term.rank1(mr.first + 1) - m_layer_rank[layer];
+            rank += is_term.rank1(mr.first + 1) - m_layer_id_rank[layer].rank;
         ++i;
     }
     if (index) *index = size_t(-1);
@@ -626,7 +635,7 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 template<class RankSelectTerm>
 size_t
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-state_begin(const RankSelectTerm& is_term) const {
+state_begin(const RankSelectTerm& is_term) const noexcept {
     if (is_term[0])
         return 0;
     return state_next(0, is_term);
@@ -636,7 +645,7 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 template<class RankSelectTerm>
 size_t
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-state_end(const RankSelectTerm& is_term) const {
+state_end(const RankSelectTerm& is_term) const noexcept {
     size_t state = 0;
     while (true) {
 #if !defined(TERARK_NLT_ENABLE_SEL0_CACHE)
@@ -666,7 +675,7 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 template<class RankSelectTerm>
 size_t
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-state_next(size_t state, const RankSelectTerm& is_term) const {
+state_next(size_t state, const RankSelectTerm& is_term) const noexcept {
     while (true) {
 #if !defined(TERARK_NLT_ENABLE_SEL0_CACHE)
         size_t bitpos = m_louds.select0(state);
@@ -723,7 +732,7 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 template<class RankSelectTerm>
 size_t
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-state_prev(size_t state, const RankSelectTerm& is_term) const {
+state_prev(size_t state, const RankSelectTerm& is_term) const noexcept {
     while (true) {
         if (state == 0)
             return size_t(-1);
@@ -756,14 +765,13 @@ state_prev(size_t state, const RankSelectTerm& is_term) const {
 #endif
                 lcount = m_louds.one_seq_len(bitpos + 1);
             }
-            if (is_term[state])
-                return state;
-            continue;
         }
-        size_t parent = bitpos - state;
-        assert(m_louds.rank1(bitpos) == state);
-        assert(m_louds.is1(bitpos));
-        state = parent - 1;
+        else {
+            size_t parent = bitpos - state;
+            assert(m_louds.rank1(bitpos) == state);
+            assert(m_louds.is1(bitpos));
+            state = parent - 1;
+        }
         if (is_term[state])
             return state;
     }
@@ -773,10 +781,10 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 template<class RankSelectTerm>
 size_t
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-state_to_dict_rank(size_t state, const RankSelectTerm& is_term) const {
+state_to_dict_rank(size_t state, const RankSelectTerm& is_term) const noexcept {
     assert(state < m_louds.max_rank1());
-    size_t layer_max = m_layer_id.size();
-    size_t layer = upper_bound_0(m_layer_id.data(), layer_max, state) - 1;
+    size_t layer_max = m_layer_id_rank.size();
+    size_t layer = upper_bound_ex_a(m_layer_id_rank, state, TERARK_FIELD(id)) - 1;
     assert(layer < layer_max);
     size_t parent_rank = 0;
     size_t parent = state;
@@ -785,20 +793,20 @@ state_to_dict_rank(size_t state, const RankSelectTerm& is_term) const {
         parent = m_louds.select1(parent) - parent - 1;
         --parent_layer;
         size_t rank = is_term.rank1(parent + 1);
-        parent_rank += rank - m_layer_rank[parent_layer];
+        parent_rank += rank - m_layer_id_rank[parent_layer].rank;
     };
     assert(parent_layer == 0);
-    size_t child_rank = is_term.rank1(state) - m_layer_rank[layer];
+    size_t child_rank = is_term.rank1(state) - m_layer_id_rank[layer].rank;
     size_t child = state;
     size_t child_layer = layer + 1;
     while (child_layer < layer_max) {
         child = m_louds.select0(child) - child;
         assert(child <= is_term.size());
-        if (child == m_layer_id[child_layer])
+        if (child == m_layer_id_rank[child_layer].id)
             break;
-        assert(child > m_layer_id[child_layer]);
+        assert(child > m_layer_id_rank[child_layer].id);
         size_t rank = is_term.rank1(child);
-        child_rank += rank - m_layer_rank[child_layer];
+        child_rank += rank - m_layer_id_rank[child_layer].rank;
         ++child_layer;
     }
     return parent_rank + child_rank;
@@ -808,9 +816,9 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 template<class RankSelectTerm>
 size_t
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-dict_rank_to_state(size_t index, const RankSelectTerm& is_term) const {
+dict_rank_to_state(size_t index, const RankSelectTerm& is_term) const noexcept {
     assert(index < m_louds.max_rank1());
-    size_t layer_max = m_layer_id.size();
+    size_t layer_max = m_layer_id_rank.size();
 #if 0
     valvec<layer_ref_t> layer = m_layer_ref;
 #else
@@ -821,7 +829,7 @@ dict_rank_to_state(size_t index, const RankSelectTerm& is_term) const {
     while (true) {
         assert(layer[layer_id].beg < layer[layer_id].end);
         size_t state = layer[layer_id].mid = (layer[layer_id].beg + layer[layer_id].end) / 2;
-        assert(layer_id == upper_bound_0(m_layer_id.data(), layer_max, state) - 1);
+        assert(layer_id == upper_bound_ex_a(m_layer_id_rank, state, TERARK_FIELD(id)) - 1);
         size_t parent_rank = 0;
         size_t parent = state;
         size_t parent_layer = layer_id;
@@ -830,24 +838,24 @@ dict_rank_to_state(size_t index, const RankSelectTerm& is_term) const {
             --parent_layer;
             layer[parent_layer].mid = parent;
             size_t rank = is_term.rank1(parent + 1);
-            parent_rank += rank - m_layer_rank[parent_layer];
+            parent_rank += rank - m_layer_id_rank[parent_layer].rank;
         };
         assert(parent_layer == 0);
-        size_t child_rank = is_term.rank1(state) - m_layer_rank[layer_id];
+        size_t child_rank = is_term.rank1(state) - m_layer_id_rank[layer_id].rank;
         size_t child = state;
         size_t child_layer = layer_id + 1;
         while (child_layer < layer_max) {
             child = m_louds.select0(child) - child;
             layer[child_layer].mid = child;
             assert(child <= is_term.size());
-            if (child == m_layer_id[child_layer]) {
+            if (child == m_layer_id_rank[child_layer].id) {
                 while (++child_layer < layer_max)
-                    layer[child_layer].mid = m_layer_id[child_layer];
+                    layer[child_layer].mid = m_layer_id_rank[child_layer].id;
                 break;
             }
-            assert(child > m_layer_id[child_layer]);
+            assert(child > m_layer_id_rank[child_layer].id);
             size_t rank = is_term.rank1(child);
-            child_rank += rank - m_layer_rank[child_layer];
+            child_rank += rank - m_layer_id_rank[child_layer].rank;
             ++child_layer;
         }
         size_t rank = parent_rank + child_rank;
@@ -914,7 +922,7 @@ dict_rank_to_state(size_t index, const RankSelectTerm& is_term) const {
 template<class RankSelect, class RankSelect2, bool FastLabel>
 inline uint64_t
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-get_link_val(size_t node_id) const {
+get_link_val(size_t node_id) const noexcept {
 	assert(node_id > 0);
 	assert(node_id < m_is_link.size());
 	size_t linkRank1 = m_is_link.rank1(node_id);
@@ -930,7 +938,7 @@ get_link_val(size_t node_id) const {
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
 size_t NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-num_children(size_t parent) const {
+num_children(size_t parent) const noexcept {
 	assert(parent < total_states());
 	size_t bitpos = m_louds.select0(parent);
 	assert(m_louds.rank0(bitpos) == parent);
@@ -940,7 +948,7 @@ num_children(size_t parent) const {
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
 bool NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-has_children(size_t parent) const {
+has_children(size_t parent) const noexcept {
 	assert(parent < total_states());
 	size_t bitpos = m_louds.select0(parent);
 	assert(m_louds.rank0(bitpos) == parent);
@@ -949,7 +957,7 @@ has_children(size_t parent) const {
 }
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
-size_t NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::gnode_states() const {
+size_t NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::gnode_states() const noexcept {
 	return m_is_link.size();
 }
 
@@ -987,7 +995,7 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 template<class Entry>
 inline
 size_t NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-initIterEntry(size_t parent, Entry* e, byte_t* buf, size_t cap) const {
+initIterEntry(size_t parent, Entry* e, byte_t* buf, size_t cap) const noexcept {
     assert(parent < total_states());
     m_is_link.prefetch_bit(parent);
 #if !defined(TERARK_NLT_ENABLE_SEL0_CACHE)
@@ -1026,7 +1034,7 @@ initIterEntry(size_t parent, Entry* e, byte_t* buf, size_t cap) const {
 template<class RankSelect, class RankSelect2, bool FastLabel>
 inline
 byte_t NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-getFirstChar(size_t child0, size_t lcount) const {
+getFirstChar(size_t child0, size_t lcount) const noexcept {
     assert(lcount > 0);
     if (FastLabel) {
         if (lcount < 36) {
@@ -1052,7 +1060,7 @@ getFirstChar(size_t child0, size_t lcount) const {
 template<class RankSelect, class RankSelect2, bool FastLabel>
 inline
 byte_t NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-getNthChar(size_t child0, size_t lcount, size_t nth) const {
+getNthChar(size_t child0, size_t lcount, size_t nth) const noexcept {
     assert(nth < lcount);
     assert(child0 + lcount <= total_states());
     if (FastLabel) {
@@ -1070,7 +1078,7 @@ getNthChar(size_t child0, size_t lcount, size_t nth) const {
 template<class RankSelect, class RankSelect2, bool FastLabel>
 inline
 byte_t NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-getNthCharNext(size_t child0, size_t lcount, size_t nth, byte_t cch) const {
+getNthCharNext(size_t child0, size_t lcount, size_t nth, byte_t cch) const noexcept {
     assert(nth < lcount);
     assert(child0 + lcount <= total_states());
     if (FastLabel) {
@@ -1099,7 +1107,7 @@ getNthCharNext(size_t child0, size_t lcount, size_t nth, byte_t cch) const {
 template<class RankSelect, class RankSelect2, bool FastLabel>
 inline
 byte_t NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
-getNthCharPrev(size_t child0, size_t lcount, size_t nth, byte_t cch) const {
+getNthCharPrev(size_t child0, size_t lcount, size_t nth, byte_t cch) const noexcept {
     assert(nth < lcount);
     assert(child0 + lcount <= total_states());
     if (FastLabel) {
@@ -1135,10 +1143,15 @@ template<class RankSelect, class RankSelect2, bool FastLabel>
 template<class Dawg>
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 Iterator<Dawg>::Iterator(const Dawg* d) : ADFA_LexIterator(valvec_no_init()) {
+    // Iterator object just has one memory block, m_word and Entry vector
+    // are following Iterator object memory, as layout:
+    //   1. Iterator
+    //   2. word_mem -- for iter->word() + extra 16 bytes for user land data
+    //   3. pile_mem -- for Entry stack
     const NestLoudsTrieTpl* trie = d->m_trie;
-    size_t word_mem = pow2_align_up(trie->m_max_strlen + 17, 16);
-    size_t iter_mem = sizeof(Entry)*(trie->m_layer_id.size() + 2);
-    m_word.ensure_capacity(word_mem + iter_mem);
+    size_t word_mem = pow2_align_up(trie->m_max_strlen + 1 + 16, 16);
+    size_t pile_mem = sizeof(typename Iterator<Dawg>::Entry)*(trie->m_layer_id_rank.size() + 2);
+    m_word.ensure_capacity(word_mem + pile_mem);
     m_dfa = d;
     m_top = m_base = (Entry*)(m_word.data() + word_mem);
     m_trie = trie;
@@ -1150,9 +1163,9 @@ template<class Dawg>
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 UserMemIterator<Dawg>::UserMemIterator(const Dawg* d, void* user_mem) {
     const NestLoudsTrieTpl* trie = d->m_trie;
-    size_t word_mem = pow2_align_up(trie->m_max_strlen + 17, 16);
-    size_t iter_mem = sizeof(Entry)*(trie->m_layer_id.size() + 2);
-    m_word.risk_set_data((byte_t*)user_mem, word_mem + iter_mem);
+    size_t word_mem = pow2_align_up(trie->m_max_strlen + 1 + 16, 16);
+    size_t pile_mem = sizeof(typename Iterator<Dawg>::Entry)*(trie->m_layer_id_rank.size() + 2);
+    m_word.risk_set_data((byte_t*)user_mem, word_mem + pile_mem);
     m_dfa = d;
     m_top = m_base = (Entry*)(m_word.data() + word_mem);
     m_trie = trie;
@@ -1170,9 +1183,9 @@ template<class Dawg>
 inline size_t
 NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
 UserMemIterator<Dawg>::s_max_mem_size(const NestLoudsTrieTpl* trie) {
-    size_t word_mem = pow2_align_up(trie->m_max_strlen + 17, 16);
-    size_t iter_mem = sizeof(Entry)*(trie->m_layer_id.size() + 2);
-    return word_mem + iter_mem;
+    size_t word_mem = pow2_align_up(trie->m_max_strlen + 1 + 16, 16);
+    size_t pile_mem = sizeof(typename Iterator<Dawg>::Entry)*(trie->m_layer_id_rank.size() + 2);
+    return word_mem + pile_mem;
 }
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
@@ -1205,9 +1218,9 @@ Iterator<Dawg>::reset(const BaseDFA* dfa, size_t root) {
     }
     const Dawg* d = static_cast<const Dawg*>(dfa);
     const NestLoudsTrieTpl* trie = d->m_trie;
-    size_t word_mem = pow2_align_up(trie->m_max_strlen + 17, 16);
-    size_t iter_mem = sizeof(Entry)*(trie->m_layer_id.size() + 2);
-    m_word.ensure_capacity(word_mem + iter_mem);
+    size_t word_mem = pow2_align_up(trie->m_max_strlen + 1 + 16, 16);
+    size_t pile_mem = sizeof(typename Iterator<Dawg>::Entry)*(trie->m_layer_id_rank.size() + 2);
+    m_word.ensure_capacity(word_mem + pile_mem);
     m_dfa = d;
     m_top = m_base = (Entry*)(m_word.data() + word_mem);
     m_trie = trie;

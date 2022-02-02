@@ -224,8 +224,7 @@ void
 ZipOffsetBlobStore::get_record_append_imp(size_t recID, valvec<byte_t>* recData)
 const {
     assert(recID + 1 < m_offsets.size());
-    size_t BegEnd[2];
-    m_offsets.get2(recID, BegEnd);
+    auto BegEnd = m_offsets.get2(recID);
     assert(BegEnd[0] <= BegEnd[1]);
     assert(BegEnd[1] <= m_content.size());
     size_t len = BegEnd[1] - BegEnd[0];
@@ -307,8 +306,7 @@ ZipOffsetBlobStore::fspread_record_append_imp(
                     valvec<byte_t>* rdbuf)
 const {
     assert(recID + 1 < m_offsets.size());
-    size_t BegEnd[2];
-    m_offsets.get2(recID, BegEnd);
+    auto BegEnd = m_offsets.get2(recID);
     assert(BegEnd[0] <= BegEnd[1]);
     assert(BegEnd[1] <= m_content.size());
     size_t len = BegEnd[1] - BegEnd[0];
@@ -359,8 +357,7 @@ const {
         //size_t newId = newToOld.index();
         size_t oldId = *newToOld;
         assert(oldId < recNum);
-        size_t BegEnd[2];
-        m_offsets.get2(oldId, BegEnd);
+        auto BegEnd = m_offsets.get2(oldId);
         zipOffsetBuilder->push_back(offset);
         assert(BegEnd[0] <= BegEnd[1]);
         offset += BegEnd[1] - BegEnd[0];
@@ -380,8 +377,7 @@ const {
     for (newToOld.rewind(); !newToOld.eof(); ++newToOld) {
         //size_t newId = newToOld.index();
         size_t oldId = *newToOld;
-        size_t BegEnd[2];
-        m_offsets.get2(oldId, BegEnd);
+        auto BegEnd = m_offsets.get2(oldId);
         size_t len = BegEnd[1] - BegEnd[0];
         const byte* beg = m_content.data() + BegEnd[0];
         xxhash64.update(beg, len);
@@ -496,7 +492,7 @@ public:
                 + sizeof(BlobStoreFileFooter);
 
             assert(m_memStream.size() == file_size - sizeof(BlobStoreFileFooter));
-            m_memStream.stream()->resize(file_size);
+            m_memStream.stream()->reserve(file_size);
             *(FileHeader*)m_memStream.stream()->begin() =
                 FileHeader(fstring(m_memStream.stream()->begin(), m_memStream.size()), m_content_size, offsets_size,
                                    m_options);
@@ -506,7 +502,7 @@ public:
 
             BlobStoreFileFooter footer;
             footer.fileXXHash = xxhash64.digest();
-            m_memStream.stream()->resize(file_size);
+            m_memStream.stream()->reserve(file_size);
             ((BlobStoreFileFooter*)(m_memStream.stream()->end()))[-1] = footer;
         } else {
             m_builder->finish(nullptr);
@@ -529,7 +525,7 @@ public:
             FileStream(m_fpath, "rb+").chsize(file_size);
             MmapWholeFile mmap(m_fpath, true);
             fstring mem((const char*)mmap.base + m_offset, (ptrdiff_t)(file_size - m_offset));
-            *(FileHeader*)((byte_t*)mmap.base + m_offset) = FileHeader(mem, m_content_size, offsets_size, 
+            *(FileHeader*)((byte_t*)mmap.base + m_offset) = FileHeader(mem, m_content_size, offsets_size,
                                                                        m_options);
 
             XXHash64 xxhash64(g_dpbsnark_seed);

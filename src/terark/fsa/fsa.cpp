@@ -822,6 +822,7 @@ BaseDFA* BaseDFA::load_mmap(int fd, bool mmapPopulate) {
 	ullong fsize = st.st_size;
 #endif
 	if (fsize < base->file_size) {
+		mmap_close((void*)base, fsize);
 		THROW_STD(invalid_argument, "length=%lld, header.file_size=%lld"
 			, fsize, (long long)base->file_size);
 	}
@@ -919,6 +920,9 @@ void Do_save_mmap(const BaseDFA* dfa, int fd,
 			intptr_t len2 = ::write(fd, data + written, len1);
 			if (terark_likely(len2 > 0)) {
 				written += len2;
+			}
+			else if (EINTR == errno) {
+				continue;
 			}
 			else {
 				Throw(len1, len2);

@@ -1,5 +1,4 @@
-#ifndef __terark_rank_select_il_256_hpp__
-#define __terark_rank_select_il_256_hpp__
+#pragma once
 
 #include "rank_select_basic.hpp"
 
@@ -27,7 +26,7 @@ protected:
     size_t    m_max_rank1; // m_max_rank0+m_max_rank1==LineBits*m_lines.size()
     size_t    m_size;
 
-    void push_back_slow_path(bool val);
+    void push_back_slow_path(bool val) noexcept;
 
 public:
     typedef boost::mpl::false_ is_mixed;
@@ -299,7 +298,7 @@ fast_select1_q(const Line* lines, const uint32_t* sel1, const Line*, size_t Rank
 
 typedef rank_select_il rank_select_il_256;
 typedef rank_select_il rank_select_il_256_32;
-typedef rank_select_il rank_select_il_256_32_11; // Q0=4, Q1=1
+typedef rank_select_il rank_select_il_256_32_11; // Q0=1, Q1=1
 
 // suffix "_41" means Q0=4, Q1=1
 class TERARK_DLL_EXPORT rank_select_il_256_32_41 : public rank_select_il_256_32 {
@@ -316,6 +315,3 @@ public:
 
 
 } // namespace terark
-
-#endif // __terark_rank_select_il_256_hpp__
-

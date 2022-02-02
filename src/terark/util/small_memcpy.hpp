@@ -1,14 +1,18 @@
 #pragma once
 #include <terark/config.hpp>
+#if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__x86_64) || defined(__amd64__) || defined(__amd64)
 #include <xmmintrin.h>
+#endif
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
 #if defined(__GNUC__) && __GNUC__ * 1000 + __GNUC_MINOR__ >= 4005
-	#include <x86intrin.h>
+  #if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__x86_64) || defined(__amd64__) || defined(__amd64)
+    #include <x86intrin.h>
+  #endif
 #endif
 #if defined(_MSC_VER) && _MSC_VER >= 1500 || defined(__CYGWIN__)
-	#include <intrin.h>
+    #include <intrin.h>
 #endif
 
 #if defined(__GNUC__)
@@ -21,19 +25,26 @@ namespace terark {
 
 static inline //HSM_FORCE_INLINE
 byte_t* small_memcpy_align_1(void* dst, const void* src, size_t len) {
-	typedef uint64_t   By8 TERARK_GNU_UNALIGNED;
-	typedef uint32_t   By4 TERARK_GNU_UNALIGNED;
-	typedef uint16_t   By2 TERARK_GNU_UNALIGNED;
-	typedef uint8_t    By1;
+#if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__x86_64) || defined(__amd64__) || defined(__amd64)
+    typedef uint8_t    By1;
     auto bdst = (      By1*)dst;
     auto bsrc = (const By1*)src;
     while (len >= 16) {
-	    __m128i m0 = _mm_loadu_si128((const __m128i*)bsrc);
-	    _mm_storeu_si128((__m128i*)bdst, m0);
+        __m128i m0 = _mm_loadu_si128((const __m128i*)bsrc);
+        _mm_storeu_si128((__m128i*)bdst, m0);
         len  -= 16;
         bsrc += 16;
         bdst += 16;
     }
+   #if defined(__AVX512VL__) && defined(__AVX512BW__)
+    auto mask = _bzhi_u32(-1, len);
+    auto tail = _mm_maskz_loadu_epi8(mask, bsrc);
+    _mm_mask_storeu_epi8(bdst, mask, tail);
+    return bdst + len;
+   #else
+    typedef uint64_t   By8 TERARK_GNU_UNALIGNED;
+    typedef uint32_t   By4 TERARK_GNU_UNALIGNED;
+    typedef uint16_t   By2 TERARK_GNU_UNALIGNED;
     bsrc += len;
     bdst += len;
     switch (len) {
@@ -62,7 +73,20 @@ byte_t* small_memcpy_align_1(void* dst, const void* src, size_t len) {
               break;
     }
     return bdst;
+   #endif
+#else
+    return (byte_t*)mempcpy(dst, src, len);
+#endif // _M_X64
 }
+
+#if defined(__AVX512VL__) && defined(__AVX512BW__)
+
+    #define small_memcpy_align_8 small_memcpy_align_1
+    #define small_memcpy_align_4 small_memcpy_align_1
+    #define tiny_memcpy_align_4  small_memcpy_align_1
+    #define tiny_memcpy_align_1  small_memcpy_align_1
+
+#else
 
 static inline //HSM_FORCE_INLINE
 byte_t* small_memcpy_align_8(void* dst, const void* src, size_t len) {
@@ -80,12 +104,13 @@ byte_t* small_memcpy_align_4(void* dst, const void* src, size_t len) {
     assert(len % 4 == 0);
     assert((size_t(dst) & 3) == 0);
     assert((size_t(src) & 3) == 0);
-	typedef uint64_t  By8 TERARK_GNU_UNALIGNED;
-	typedef uint32_t  By4 TERARK_GNU_UNALIGNED;
-	typedef uint8_t   By1;
+#if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__x86_64) || defined(__amd64__) || defined(__amd64)
+    typedef uint64_t  By8 TERARK_GNU_UNALIGNED;
+    typedef uint32_t  By4 TERARK_GNU_UNALIGNED;
+    typedef uint8_t   By1;
     while (len >= 16) {
-	    __m128i m0 = _mm_loadu_si128((const __m128i*)src);
-	    _mm_storeu_si128((__m128i*)dst, m0);
+        __m128i m0 = _mm_loadu_si128((const __m128i*)src);
+        _mm_storeu_si128((__m128i*)dst, m0);
         len -= 16;
         src = (const By1*)src + 16;
         dst = (      By1*)dst + 16;
@@ -100,6 +125,9 @@ byte_t* small_memcpy_align_4(void* dst, const void* src, size_t len) {
             ((By4*)dst)[2] = ((const By4*)src)[2];
     }
     return (By1*)dst + len;
+#else
+    return (byte_t*)mempcpy(dst, src, len);
+#endif
 }
 
 static inline //HSM_FORCE_INLINE
@@ -126,6 +154,8 @@ byte_t* tiny_memcpy_align_1(void* dst, const void* src, size_t len) {
     }
     return Dst;
 }
+
+#endif // __AVX512VL__ && __AVX512BW__
 
 static inline
 byte_t* tiny_memset_align_1(void* dst, unsigned char val, size_t len) {
@@ -159,4 +189,4 @@ byte_t* tiny_memset_align_4(void* dst, uint32_t val, size_t len) {
     return (byte_t*)Dst;
 }
 
-} // namespace terark 
+} // namespace terark

@@ -1,6 +1,5 @@
 /* vim: set tabstop=4 : */
-#ifndef __terark_io_byte_swap_impl_h__
-#define __terark_io_byte_swap_impl_h__
+#pragma once
 
 /* The ISO C99 standard specifies that in C++ implementations these
  *    should only be defined if explicitly requested __STDC_CONSTANT_MACROS
@@ -22,6 +21,7 @@
 
 //#include <boost/cstdint.hpp>
 #include <limits.h>
+#include <string.h> // for memcpy
 
 #ifdef ULONG_MAX
 #	if ULONG_MAX != 0xFFFFFFFFul
@@ -51,7 +51,7 @@ inline __int64 byte_swap(__int64 x) { return _byteswap_uint64(x); }
 
 inline wchar_t byte_swap(wchar_t x) { return _byteswap_ushort(x); }
 
-#elif defined(__GNUC__) && defined(__GNUC_MINOR__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 3))
+#elif defined(__GNUC__) && defined(__GNUC_MINOR__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 3)) || defined(__clang__)
 
 inline unsigned short byte_swap(unsigned short x) { return x << 8 | x >> 8; }
 inline short byte_swap(short x) { return x << 8 | (unsigned short)x >> 8; }
@@ -113,7 +113,50 @@ inline long byte_swap(long x) { return byte_swap((unsigned long long)x); }
 
 #endif
 
+#if defined(__GNUC__) && __GNUC_MINOR__ + 1000 * __GNUC__ > 5000
+  #pragma GCC diagnostic push
+  #pragma GCC diagnostic ignored "-Wstrict-aliasing"
+#endif
+
+#if defined(__GNUC__) && __GNUC__ >= 12 && !defined(__INTEL_COMPILER)
+inline __int128 byte_swap(__int128 x) { return __builtin_bswap128(x); }
+inline unsigned __int128 byte_swap(unsigned __int128 x) { return __builtin_bswap128(x); }
+#elif defined(_MSC_VER)
+#else
+inline unsigned __int128 byte_swap(unsigned __int128 x) {
+	struct LoHi64 { unsigned long long lo, hi; };
+	LoHi64& y = reinterpret_cast<LoHi64&>(x);
+	LoHi64  z = {byte_swap(y.hi), byte_swap(y.lo)};
+	return (unsigned __int128&)(z);
+}
+inline __int128 byte_swap(__int128 x) {
+	return byte_swap((unsigned __int128)(x));
+}
+#endif
+
+inline unsigned char byte_swap(unsigned char x) { return x; }
+inline   signed char byte_swap(  signed char x) { return x; }
+inline          char byte_swap(         char x) { return x; }
+
+inline float byte_swap(float x) {
+	unsigned int tmp;
+	static_assert(sizeof(tmp) == sizeof(x));
+	memcpy(&tmp, &x, sizeof(x));
+	tmp = byte_swap(tmp);
+	memcpy(&x, &tmp, sizeof(x));
+	return x;
+}
+inline double byte_swap(double x) {
+	unsigned long long tmp;
+	static_assert(sizeof(tmp) == sizeof(x));
+	memcpy(&tmp, &x, sizeof(x));
+	tmp = byte_swap(tmp);
+	memcpy(&x, &tmp, sizeof(x));
+	return x;
+}
+
+#if defined(__GNUC__) && __GNUC_MINOR__ + 1000 * __GNUC__ > 5000
+  #pragma GCC diagnostic pop
+#endif
+
 } // namespace terark
-
-#endif // __terark_io_byte_swap_impl_h__
-

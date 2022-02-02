@@ -910,6 +910,15 @@ public:
 		return p + oldsize;
 	}
 
+    // T must be memmove-able
+    T* make_space_no_init(size_t pos, size_t len) {
+        size_t movecnt = n - pos;
+        resize_no_init(n + len);
+        T* space = p + pos;
+        memmove(space + len, space, sizeof(T) * movecnt);
+        return space;
+    }
+
     void unchecked_push_back() {
 		size_t oldsize = n;
 		assert(oldsize < c);

@@ -1,13 +1,14 @@
-#ifndef __penglei_bitmanip_h__
-#define __penglei_bitmanip_h__
+#pragma once
 
 #include <assert.h>
 #include <limits.h>
-//#include <boost/static_assert.hpp>
 #include "config.hpp"
+#include <cstddef>
 
 #if defined(__GNUC__) && __GNUC__ * 1000 + __GNUC_MINOR__+0 >= 4005 || defined(__clang__)
+  #if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__x86_64) || defined(__amd64__) || defined(__amd64)
 	#include <x86intrin.h>
+  #endif
 #endif
 
 #if defined(_MSC_VER) && _MSC_VER >= 1500 || defined(__CYGWIN__)
@@ -115,6 +116,8 @@ namespace terark {
   #endif
 #endif // select best popcount implementations
 
+#if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__x86_64) || defined(__amd64__) || defined(__amd64)
+
 #if TERARK_WORD_BITS >= 64
   #if defined(__INTEL_COMPILER) && !defined(_MSC_VER)
 	inline unsigned terark_bsr_u64(unsigned __int64 i) {
@@ -155,6 +158,19 @@ namespace terark {
     // for gcc/clang/icc
 	#define terark_bsr_u32 _bit_scan_reverse
 #endif
+
+#else // _M_X64
+
+inline unsigned terark_bsr_u64(unsigned long long i) {
+    return 63 - __builtin_clzll(i);
+}
+
+inline unsigned terark_bsr_u32(unsigned i) {
+    return 31 - __builtin_clz(i);
+}
+
+#endif // _M_X64
+
 
 #if defined(__CYGWIN__) && 0
 // cygwin gcc bittest has problems
@@ -328,7 +344,3 @@ template<> class BitsToUint<32> { typedef unsigned int type; };
 template<> class BitsToUint<64> { typedef unsigned long long type; };
 
 } // namespace terark
-
-
-#endif
-

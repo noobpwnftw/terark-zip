@@ -55,6 +55,11 @@ static constexpr uint08_t FLAG_lock      = 0x1 << 7;
 #undef prefetch
 #define prefetch(ptr) _mm_prefetch((const char*)(ptr), _MM_HINT_T0)
 
+#if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__x86_64) || defined(__amd64__) || defined(__amd64)
+#else
+   #define _mm_pause()
+#endif
+
 inline void cas_unlock(bool& lock) {
     as_atomic(lock).store(false, std::memory_order_release);
 }
@@ -3078,7 +3083,7 @@ void Patricia::TokenBase::mt_acquire(Patricia* trie1) {
             assert(AcquireDone == m_flags.state);
         }
         else {
-            if (AcquireDone == flags.state) {
+            if (ReleaseWait == flags.state) {
                 // spuriously fail
             }
             else {
@@ -3398,7 +3403,6 @@ void PatriciaMem<Align>::reclaim_head() {
                 head = next;
             }
             else {
-            // std::this_thread::yield(); // yield may cause bad stall
                 _mm_pause(); // retry loop
             }
             break;

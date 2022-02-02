@@ -52,6 +52,7 @@ FILE(GLOB FSA_SRC src/terark/fsa/*.cpp)
 FILE(GLOB ZSTD_SRC 3rdparty/zstd/zstd/common/*.c
         3rdparty/zstd/zstd/compress/*.c
         3rdparty/zstd/zstd/decompress/*.c
+        3rdparty/zstd/zstd/decompress/*.S
         3rdparty/zstd/zstd/deprecated/*.c
         3rdparty/zstd/zstd/dictBuilder/*.c
         3rdparty/zstd/zstd/legacy/*.c)

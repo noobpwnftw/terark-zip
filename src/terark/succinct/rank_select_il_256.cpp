@@ -14,7 +14,7 @@ inline rank_select_il::Line::Line(bool val) {
         memset(words, 0, sizeof(words));
 }
 
-void rank_select_il::push_back_slow_path(bool val) {
+void rank_select_il::push_back_slow_path(bool val) noexcept {
     rank_select_check_overflow(m_size, >= , rank_select_il_256);
     m_lines.emplace_back(false);
     this->set(m_size++, val);

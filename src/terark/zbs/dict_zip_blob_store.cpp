@@ -17,7 +17,6 @@
 #include <zstd/dictBuilder/divsufsort.h>
 #include "sufarr_inducedsort.h"
 #include <terark/thread/pipeline.hpp>
-#include <terark/thread/fiber_aio.hpp>
 #include <terark/util/crc.hpp>
 #include <terark/util/profiling.hpp>
 #include <terark/util/sortable_strvec.hpp>
@@ -68,74 +67,79 @@ enum class EmbeddedDictType : uint8_t {
 
 //#define DzTypeBits 3
 enum class DzType : byte {
-	Literal,   // len in [1, 32]
-	Global,    // len in [6, ...)
-	RLE,       // distance is 1, len in [2, 33]
-	NearShort, // distance in [2, 9], len in [2, 5]
-	Far1Short, // distance in [2, 257], len in [2, 33]
-	Far2Short, // distance in [258, 258+65535], len in [2, 33]
+    Literal,   // len in [1, 32]
+    Global,    // len in [6, ...)
+    RLE,       // distance is 1, len in [2, 33]
+    NearShort, // distance in [2, 9], len in [2, 5]
+    Far1Short, // distance in [2, 257], len in [2, 33]
+    Far2Short, // distance in [258, 258+65535], len in [2, 33]
 
-	// min distance = 0, reduce 1 instruction when unzip
-	Far2Long,  // distance in [0, 65535], len in [34, ...)
-	Far3Long,  // distance in [0, 2^24-1], len in [5, 35] or [36, ...)
+    // min distance = 0, reduce 1 instruction when unzip
+    Far2Long,  // distance in [0, 65535], len in [34, ...)
+    Far3Long,  // distance in [0, 2^24-1], len in [5, 35] or [36, ...)
 };
 struct DzEncodingMeta {
-	DzType type;
-	signed char len;
+    DzType type;
+    signed char len;
 };
 DzEncodingMeta GetBackRef_EncodingMeta(size_t distance, size_t len) {
-	assert(distance >= 1);
-	assert(distance <= 1ul<<24);
-	assert(len >= 2);
-	assert(len <= 1ul<<24);
-	if (1 == len) {
-		return { DzType::Literal, 2 };
-	}
-	if (1 == distance && len <= 33) {
-		return { DzType::RLE, 1 };
-	}
-	if (distance >= 2 && distance <= 9 && len <= 5) {
-		return { DzType::NearShort, 1 };
-	}
-	if (distance >= 2 && distance <= 257 && len <= 33) {
-		return { DzType::Far1Short, 2 };
-	}
-	if (distance >= 258 && distance <= 258+65535 && len <= 33) {
-		return { DzType::Far2Short, 3 };
-	}
-	if (distance <= 65535 && len >= 34) {
-		if (len <= 34+30)
-			return { DzType::Far2Long, 3 };
-		else
-			// var uint, likely max extra 3 bytes for encoded len
-			return { DzType::Far2Long, 6 };
-	}
-	// Far3Long
-	if (len <= 35)
-		return { DzType::Far3Long, 4 };
-	else
-		// var uint, likely max extra 3 bytes for encoded len
-		return { DzType::Far3Long, 7 };
+    assert(distance >= 1);
+    assert(distance <= 1ul<<24);
+    assert(len >= 2);
+    //assert(len < 1ul<<24);
+#if !defined(NDEBUG)
+    if (len >= 1ul<<24) {
+        fprintf(stderr, "WARN: DictZipBlobStore: too long match = %zd\n", len);
+    }
+#endif
+    if (1 == len) {
+        return { DzType::Literal, 2 };
+    }
+    if (1 == distance && len <= 33) {
+        return { DzType::RLE, 1 };
+    }
+    if (distance >= 2 && distance <= 9 && len <= 5) {
+        return { DzType::NearShort, 1 };
+    }
+    if (distance >= 2 && distance <= 257 && len <= 33) {
+        return { DzType::Far1Short, 2 };
+    }
+    if (distance >= 258 && distance <= 258+65535 && len <= 33) {
+        return { DzType::Far2Short, 3 };
+    }
+    if (distance <= 65535 && len >= 34) {
+        if (len <= 34+30)
+            return { DzType::Far2Long, 3 };
+        else
+            // var uint, likely max extra 3 bytes for encoded len
+            return { DzType::Far2Long, 6 };
+    }
+    // Far3Long
+    if (len <= 35)
+        return { DzType::Far3Long, 4 };
+    else
+        // var uint, likely max extra 3 bytes for encoded len
+        return { DzType::Far3Long, 7 };
 }
 
 void*
 FSE_zip(const void* data, size_t size,
-		void* gz, size_t gzsize, FSE_CTable* gtable,
-		size_t* ezsize) {
-	if (size > 2) {
-		gzsize = FSE_compress_usingCTable(gz, gzsize, data, size, gtable);
-		if (gzsize < 2 || FSE_isError(gzsize)) {
-			return NULL;
-		}
-		if (gzsize < size) {
-			*ezsize = gzsize;
-			return gz;
-		}
-		return NULL;
-	}
-	else {
-		return NULL;
-	}
+        void* gz, size_t gzsize, FSE_CTable* gtable,
+        size_t* ezsize) {
+    if (size > 2) {
+        gzsize = FSE_compress_usingCTable(gz, gzsize, data, size, gtable);
+        if (gzsize < 2 || FSE_isError(gzsize)) {
+            return NULL;
+        }
+        if (gzsize < size) {
+            *ezsize = gzsize;
+            return gz;
+        }
+        return NULL;
+    }
+    else {
+        return NULL;
+    }
 }
 
 size_t
@@ -146,49 +150,49 @@ FSE_unzip(const void* zdata, size_t zsize, void* udata, size_t usize, const void
 template<class ByteArray>
 inline size_t
 FSE_unzip(const void* zdata, size_t zsize, ByteArray& udata, const void* gtable) {
-	return FSE_unzip(zdata, zsize, udata.data(), udata.size(), gtable);
+    return FSE_unzip(zdata, zsize, udata.data(), udata.size(), gtable);
 }
 
-inline void
-DictZipBlobStore::offsetGet2(size_t recId, size_t BegEnd[2], bool isZipped)
+inline std::array<size_t, 2>
+DictZipBlobStore::offsetGet2(size_t recId, bool isZipped)
 const {
-	if (isZipped)
-		m_zOffsets.get2(recId, BegEnd);
-	else
-		m_offsets.get2(recId, BegEnd);
+    if (isZipped)
+        return m_zOffsets.get2(recId);
+    else
+        return m_offsets.get2(recId);
 }
 
 DictZipBlobStore::DictZipBlobStore() {
-	init();
+    init();
 }
 
 void DictZipBlobStore::init() {
-	m_entropyAlgo = Options::kNoEntropy;
+    m_entropyAlgo = Options::kNoEntropy;
     m_reserveOutputMultiplier = 5;
-	m_globalEntropyTableObject = NULL;
+    m_globalEntropyTableObject = NULL;
     m_huffman_decoder = NULL;
-	m_isNewRefEncoding = true;
-	new(&m_offsets)UintVecMin0();
+    m_isNewRefEncoding = true;
+    new(&m_offsets)UintVecMin0();
     m_gOffsetBits = 0;
     m_dict_verified = false;
 }
 
 DictZipBlobStore::~DictZipBlobStore() {
-	destroyMe();
+    destroyMe();
 }
 
 void DictZipBlobStore::swap(DictZipBlobStore& y) {
     AbstractBlobStore::risk_swap(y);
     std::swap(m_unzip, y.m_unzip);
-	std::swap(m_strDict, y.m_strDict);
-	std::swap(m_ptrList, y.m_ptrList);
+    std::swap(m_strDict, y.m_strDict);
+    std::swap(m_ptrList, y.m_ptrList);
     std::swap(m_entropyBitmap, y.m_entropyBitmap);
     bytewise_swap(m_offsets, y.m_offsets);
     std::swap(m_reserveOutputMultiplier, y.m_reserveOutputMultiplier);
-	std::swap(m_globalEntropyTableObject, y.m_globalEntropyTableObject);
+    std::swap(m_globalEntropyTableObject, y.m_globalEntropyTableObject);
     std::swap(m_huffman_decoder, y.m_huffman_decoder);
-	std::swap(m_entropyAlgo, y.m_entropyAlgo);
-	std::swap(m_isNewRefEncoding, y.m_isNewRefEncoding);
+    std::swap(m_entropyAlgo, y.m_entropyAlgo);
+    std::swap(m_isNewRefEncoding, y.m_isNewRefEncoding);
     std::swap(m_entropyInterleaved, y.m_entropyInterleaved);
     std::swap(m_gOffsetBits, y.m_gOffsetBits);
 }
@@ -196,11 +200,11 @@ void DictZipBlobStore::swap(DictZipBlobStore& y) {
 
 /////////////////////////////////////////////////////////////////////////////
 static inline uint32_t HashBytes(uint32_t bytes, unsigned shift) {
-	uint32_t kMul = 0x1e35a7bd;
-	return (bytes * kMul) >> shift;
+    uint32_t kMul = 0x1e35a7bd;
+    return (bytes * kMul) >> shift;
 }
 static inline uint32_t HashPtr(const byte* p, unsigned shift) {
-	return HashBytes(unaligned_load<uint32_t>(p), shift);
+    return HashBytes(unaligned_load<uint32_t>(p), shift);
 }
 
 // "DZBSNARK" = 0x4b52414e53425a44ull // DictZipBlobStoreNARK
@@ -208,84 +212,84 @@ static const uint64_t g_dzbsnark_seed = 0x4b52414e53425a44ull;
 
 class DictZipBlobStoreBuilder : public DictZipBlobStore::ZipBuilder {
 public:
-	typedef DictZipBlobStore::Options    Options;
-	typedef DictZipBlobStore::FileHeader FileHeader;
-	struct HashTable {
-		valvec<uint32_t> link;
-		valvec<uint32_t> tabl;
-	};
-	//valvec<size_t> m_offsets; // modified by writer thread (MyWriteStage)
+    typedef DictZipBlobStore::Options    Options;
+    typedef DictZipBlobStore::FileHeader FileHeader;
+    struct HashTable {
+        valvec<uint32_t> link;
+        valvec<uint32_t> tabl;
+    };
+    //valvec<size_t> m_offsets; // modified by writer thread (MyWriteStage)
     febitvec m_entropyBitmap;
-	XXHash64 m_xxhash64;
-	size_t m_zipDataSize;     // modified by writer thread
-	byte*  m_entropyZipDataBase;
+    XXHash64 m_xxhash64;
+    size_t m_zipDataSize;     // modified by writer thread
+    byte*  m_entropyZipDataBase;
 
-	DictZipBlobStore::ZipStat m_zipStat;
+    DictZipBlobStore::ZipStat m_zipStat;
 
-	// constant during compressing
-	// separate hot data for different threads, to reduce false sharing
-	DictZipBlobStore::Options m_opt;
+    // constant during compressing
+    // separate hot data for different threads, to reduce false sharing
+    DictZipBlobStore::Options m_opt;
     freq_hist_o1* m_freq_hist;
-	FSE_CTable* m_fse_gtable; // global compress table
+    FSE_CTable* m_fse_gtable; // global compress table
     Huffman::encoder_o1* m_huffman_encoder;
-	valvec<byte_t> m_entropyTableData;
-	valvec<byte_t> m_strDict;
-	struct PosLen {
-		uint32_t pos;
-		uint32_t len;
-	};
-	valvec<PosLen> m_posLen;
+    valvec<byte_t> m_entropyTableData;
+    valvec<byte_t> m_strDict;
+    struct PosLen {
+        uint32_t pos;
+        uint32_t len;
+    };
+    valvec<PosLen> m_posLen;
     uint64_t m_dictXXHash;
-	std::unique_ptr<SuffixDictCacheDFA> m_dict;
+    std::unique_ptr<SuffixDictCacheDFA> m_dict;
     SeekableStreamWrapper<FileMemIO*> m_memStream;
     SeekableStreamWrapper<FileMemIO> m_memLengthStream;
-	FileStream  m_fp;
+    FileStream  m_fp;
     FileStream  m_fpDelta;
-	std::string m_fpath;
+    std::string m_fpath;
     std::string m_fpathForLength;
     size_t      m_fpOffset;
     size_t      m_lengthCount;
     NativeDataOutput<OutputBuffer> m_fpWriter;
     NativeDataOutput<OutputBuffer> m_lengthWriter;
-	ullong  m_dataThroughBytesAtBegin;
-	ullong  m_sampleStartTime;
-	ullong  m_prepareStartTime;
-	ullong  m_dictZipStartTime;
-	size_t  m_sampleNumber;
-	size_t  m_requestSampleBytes;
-	size_t  m_lastWarnSampleBytes;
-	double  m_warnWindowSize;
-	// -------------------------------
+    ullong  m_dataThroughBytesAtBegin;
+    ullong  m_sampleStartTime;
+    ullong  m_prepareStartTime;
+    ullong  m_dictZipStartTime;
+    size_t  m_sampleNumber;
+    size_t  m_requestSampleBytes;
+    size_t  m_lastWarnSampleBytes;
+    double  m_warnWindowSize;
+    // -------------------------------
 
-	size_t m_unzipSize; // modified by app thread (addRecord)
+    size_t m_unzipSize; // modified by app thread (addRecord)
 
-	DictZipBlobStoreBuilder(const DictZipBlobStore::Options& opt)
-		: m_xxhash64(g_dzbsnark_seed)
+    DictZipBlobStoreBuilder(const DictZipBlobStore::Options& opt)
+        : m_xxhash64(g_dzbsnark_seed)
         , m_memStream(nullptr)
-	{
+    {
 
         m_fpWriter.add_ref();
         m_lengthWriter.add_ref();
         m_freq_hist = NULL;
         m_fse_gtable = NULL;
         m_huffman_encoder = NULL;
-		m_opt = opt;
-		if (m_opt.maxMatchProbe <= 0) {
-			if (m_opt.useSuffixArrayLocalMatch)
-				m_opt.maxMatchProbe = 30;
-			else
-				m_opt.maxMatchProbe = 5;
-		}
-		m_unzipSize = 0;
-		m_zipDataSize = 0;
-		m_entropyZipDataBase = nullptr;
-		m_sampleStartTime = g_pf.now();
-		m_prepareStartTime = m_sampleStartTime;
-		m_dictZipStartTime = m_sampleStartTime;
-		initWarn();
-	}
+        m_opt = opt;
+        if (m_opt.maxMatchProbe <= 0) {
+            if (m_opt.useSuffixArrayLocalMatch)
+                m_opt.maxMatchProbe = 30;
+            else
+                m_opt.maxMatchProbe = 5;
+        }
+        m_unzipSize = 0;
+        m_zipDataSize = 0;
+        m_entropyZipDataBase = nullptr;
+        m_sampleStartTime = g_pf.now();
+        m_prepareStartTime = m_sampleStartTime;
+        m_dictZipStartTime = m_sampleStartTime;
+        initWarn();
+    }
 
-	~DictZipBlobStoreBuilder() {
+    ~DictZipBlobStoreBuilder() {
         if (m_fpDelta) {
             m_lengthWriter.flush();
             m_fpDelta.close();
@@ -298,16 +302,16 @@ public:
         }
         assert(m_fse_gtable == NULL);
         assert(m_huffman_encoder == NULL);
-	}
+    }
 
-	void initWarn() {
-		m_sampleNumber = 0;
-		m_requestSampleBytes = 0;
-		m_lastWarnSampleBytes = 0;
-		m_warnWindowSize = 100.0;
-	}
+    void initWarn() {
+        m_sampleNumber = 0;
+        m_requestSampleBytes = 0;
+        m_lastWarnSampleBytes = 0;
+        m_warnWindowSize = 100.0;
+    }
 
-	void finishSample() override;
+    void finishSample() override;
 
     AbstractBlobStore::Dictionary getDictionary() const override {
         return AbstractBlobStore::Dictionary(m_strDict, m_dictXXHash);
@@ -321,23 +325,23 @@ public:
     void finish(int flag) override;
     void abandon() override;
 
-	const DictZipBlobStore::ZipStat& getZipStat() override { return m_zipStat; }
+    const DictZipBlobStore::ZipStat& getZipStat() override { return m_zipStat; }
 
     void freeDict() override { m_dict.reset(); }
 
-	void dictSortLeft();  void dictSortLeft(valvec<byte_t>& tmp);
-	void dictSortRight(); void dictSortRight(valvec<byte_t>& tmp);
-	void dictSortBoth();
-	virtual void prepareZip() {}
-	virtual void finishZip() = 0;
+    void dictSortLeft();  void dictSortLeft(valvec<byte_t>& tmp);
+    void dictSortRight(); void dictSortRight(valvec<byte_t>& tmp);
+    void dictSortBoth();
+    virtual void prepareZip() {}
+    virtual void finishZip() = 0;
 
-	bool entropyZip(const byte* rData, size_t rSize,
+    bool entropyZip(const byte* rData, size_t rSize,
                   TerarkContext& context,
                   NativeDataOutput<AutoGrownMemIO>& dio);
 
-	void zipRecord(const byte* rData, size_t rSize,
-				   HashTable&,
-				   NativeDataOutput<AutoGrownMemIO>& dio);
+    void zipRecord(const byte* rData, size_t rSize,
+                   HashTable&,
+                   NativeDataOutput<AutoGrownMemIO>& dio);
 
     template<bool UseSuffixArrayLocalMatch>
     void zipRecord_impl2(const byte* rData, size_t rSize,
@@ -347,226 +351,227 @@ public:
     void prepare(size_t records, FileMemIO& mem) override;
     void prepare(size_t records, fstring fpath) override;
     void prepare(size_t records, fstring fpath, size_t ) override;
-	void addSample(const byte* rData, size_t rSize) override;
-	void useSample(valvec<byte>& sample) override;
-	using DictZipBlobStore::ZipBuilder::addSample;
+    void addSample(const byte* rData, size_t rSize) override;
+    void useSample(valvec<byte>& sample) override;
+    using DictZipBlobStore::ZipBuilder::addSample;
 
-	void dictSwapOut(fstring fname) override;
-	void dictSwapIn(fstring fname) override;
+    void dictSwapOut(fstring fname) override;
+    void dictSwapIn(fstring fname) override;
 
-	class SingleThread;
-	class MultiThread;
+    class SingleThread;
+    class MultiThread;
 };
 
 struct PosLenCmpLeft {
-	bool operator()(const DictZipBlobStoreBuilder::PosLen& x,
-				    const DictZipBlobStoreBuilder::PosLen& y)
+    bool operator()(const DictZipBlobStoreBuilder::PosLen& x,
+                    const DictZipBlobStoreBuilder::PosLen& y)
     const {
-		auto sx = base + x.pos;
-		auto sy = base + y.pos;
-		size_t sn = std::min(x.len, y.len);
-		int r = memcmp(sx, sy, sn);
-		if (r)
-			return r < 0;
-		else
-			return x.len > y.len; // longer is less
-	}
-	const byte_t* base;
+        auto sx = base + x.pos;
+        auto sy = base + y.pos;
+        size_t sn = std::min(x.len, y.len);
+        int r = memcmp(sx, sy, sn);
+        if (r)
+            return r < 0;
+        else
+            return x.len > y.len; // longer is less
+    }
+    const byte_t* base;
 };
 struct PosLenCmpRight {
-	bool operator()(const DictZipBlobStoreBuilder::PosLen& x,
-				    const DictZipBlobStoreBuilder::PosLen& y)
+    bool operator()(const DictZipBlobStoreBuilder::PosLen& x,
+                    const DictZipBlobStoreBuilder::PosLen& y)
     const {
-		auto sx = base + x.pos + x.len;
-		auto sy = base + y.pos + y.len;
-		size_t sn = std::min(x.len, y.len);
-		while (sn) {
-			if (*--sx != *--sy) {
-				return *sx < *sy;
-			}
-			--sn;
-		}
-		return x.len > y.len; // longer is less
-	}
-	const byte_t* base;
+        auto sx = base + x.pos + x.len;
+        auto sy = base + y.pos + y.len;
+        size_t sn = std::min(x.len, y.len);
+        while (sn) {
+            if (*--sx != *--sy) {
+                return *sx < *sy;
+            }
+            --sn;
+        }
+        return x.len > y.len; // longer is less
+    }
+    const byte_t* base;
 };
 void DictZipBlobStoreBuilder::dictSortLeft() {
-	valvec<byte_t> tmp;
-	dictSortLeft(tmp);
-	m_strDict.swap(tmp);
-	m_posLen.clear();
+    valvec<byte_t> tmp;
+    dictSortLeft(tmp);
+    m_strDict.swap(tmp);
+    m_posLen.clear();
 }
 void DictZipBlobStoreBuilder::dictSortLeft(valvec<byte_t>& tmp) {
-	assert(m_posLen.size() > 0);
-	std::sort(m_posLen.begin(), m_posLen.end(), PosLenCmpLeft{m_strDict.data()});
-	tmp.reserve(m_strDict.size());
-	auto pl = m_posLen.data();
-	auto base = m_strDict.data();
-	tmp.append(base + pl[0].pos, pl[0].len);
-	for (size_t  i = 1; i < m_posLen.size(); ++i) {
-		auto sprev = base + pl[i-1].pos; auto lprev = pl[i-1].len;
-		auto scurr = base + pl[i-0].pos; auto lcurr = pl[i-0].len;
-		if (lprev >= lcurr && memcmp(sprev, scurr, lcurr) == 0) {}
-		else {
-			tmp.append(scurr, lcurr);
-		}
-	}
-	m_strDict.swap(tmp);
-	m_posLen.clear();
+    assert(m_posLen.size() > 0);
+    std::sort(m_posLen.begin(), m_posLen.end(), PosLenCmpLeft{m_strDict.data()});
+    tmp.reserve(m_strDict.size());
+    auto pl = m_posLen.data();
+    auto base = m_strDict.data();
+    tmp.append(base + pl[0].pos, pl[0].len);
+    for (size_t  i = 1; i < m_posLen.size(); ++i) {
+        auto sprev = base + pl[i-1].pos; auto lprev = pl[i-1].len;
+        auto scurr = base + pl[i-0].pos; auto lcurr = pl[i-0].len;
+        if (lprev >= lcurr && memcmp(sprev, scurr, lcurr) == 0) {}
+        else {
+            tmp.append(scurr, lcurr);
+        }
+    }
+    m_strDict.swap(tmp);
+    m_posLen.clear();
 }
 
 void DictZipBlobStoreBuilder::dictSortRight() {
-	valvec<byte_t> tmp;
-	dictSortRight(tmp);
-	m_strDict.swap(tmp);
-	m_posLen.clear();
+    valvec<byte_t> tmp;
+    dictSortRight(tmp);
+    m_strDict.swap(tmp);
+    m_posLen.clear();
 }
 void DictZipBlobStoreBuilder::dictSortRight(valvec<byte_t>& tmp) {
-	assert(m_posLen.size() > 0);
-	std::sort(m_posLen.begin(), m_posLen.end(), PosLenCmpRight{m_strDict.data()});
-	tmp.reserve(m_strDict.size());
-	auto pl = m_posLen.data();
-	auto base = m_strDict.data();
-	tmp.append(base + pl[0].pos, pl[0].len);
-	for (size_t  i = 1; i < m_posLen.size(); ++i) {
-		auto sprev = base + pl[i-1].pos; auto lprev = pl[i-1].len;
-		auto scurr = base + pl[i-0].pos; auto lcurr = pl[i-0].len;
-		if (lprev >= lcurr && memcmp(sprev+lprev-lcurr, scurr, lcurr) == 0) {}
-		else {
-			tmp.append(scurr, lcurr);
-		}
-	}
+    assert(m_posLen.size() > 0);
+    std::sort(m_posLen.begin(), m_posLen.end(), PosLenCmpRight{m_strDict.data()});
+    tmp.reserve(m_strDict.size());
+    auto pl = m_posLen.data();
+    auto base = m_strDict.data();
+    tmp.append(base + pl[0].pos, pl[0].len);
+    for (size_t  i = 1; i < m_posLen.size(); ++i) {
+        auto sprev = base + pl[i-1].pos; auto lprev = pl[i-1].len;
+        auto scurr = base + pl[i-0].pos; auto lcurr = pl[i-0].len;
+        if (lprev >= lcurr && memcmp(sprev+lprev-lcurr, scurr, lcurr) == 0) {}
+        else {
+            tmp.append(scurr, lcurr);
+        }
+    }
 }
 
 void DictZipBlobStoreBuilder::dictSortBoth() {
-	assert(m_posLen.size() > 0);
-	valvec<byte_t> tmp;
-	dictSortLeft(tmp);
-	dictSortRight();
-	if (tmp.size() < m_strDict.size()) {
-		tmp.swap(m_strDict);
-	}
+    assert(m_posLen.size() > 0);
+    valvec<byte_t> tmp;
+    dictSortLeft(tmp);
+    dictSortRight();
+    if (tmp.size() < m_strDict.size()) {
+        tmp.swap(m_strDict);
+    }
 }
 
 void DictZipBlobStoreBuilder::prepareDict() {
-	if (!m_dict) {
-		switch (m_opt.sampleSort) {
-		default:
-			THROW_STD(runtime_error, "invalid sampleSort = %d", m_opt.sampleSort);
-			break;
-		case Options::kSortNone : break;
-		case Options::kSortLeft : dictSortLeft (); break;
-		case Options::kSortRight: dictSortRight(); break;
-		case Options::kSortBoth : dictSortBoth (); break;
-		}
-		m_dict.reset(new SuffixDictCacheDFA());
-		//m_dict.reset(new HashSuffixDictCacheDFA()); // :( much slower
-		m_dict->build_sa(m_strDict);
-		size_t minFreq = m_strDict.size() < (1ul << 30) ? 15 : 31;
-		//size_t minFreq = 32*1024; // for benchmark pure suffix array match
-		m_dict->bfs_build_cache(minFreq, 64);
-	}
+    if (!m_dict) {
+        switch (m_opt.sampleSort) {
+        default:
+            THROW_STD(runtime_error, "invalid sampleSort = %d", m_opt.sampleSort);
+            break;
+        case Options::kSortNone : break;
+        case Options::kSortLeft : dictSortLeft (); break;
+        case Options::kSortRight: dictSortRight(); break;
+        case Options::kSortBoth : dictSortBoth (); break;
+        }
+        m_dict.reset(new SuffixDictCacheDFA());
+        //m_dict.reset(new HashSuffixDictCacheDFA()); // :( much slower
+        m_dict->build_sa(m_strDict);
+        size_t minFreq = UintVecMin0::compute_uintbits(m_strDict.size()+2)/2;
+        //size_t minFreq = m_strDict.size() < (1ul << 30) ? 15 : 31;
+        //size_t minFreq = 32*1024; // for benchmark pure suffix array match
+        m_dict->bfs_build_cache(minFreq, 64);
+    }
 }
 
 void DictZipBlobStoreBuilder::addSample(const byte* rData, size_t rSize) {
-	m_sampleNumber++;
-	m_requestSampleBytes += rSize;
-	if (m_strDict.size() + rSize >= INT32_MAX) {
-		if (m_requestSampleBytes - m_lastWarnSampleBytes > m_warnWindowSize) {
-			fprintf(stderr, "WARN: ZipBuilder::addSample:"
-				" m_requestSampleBytes = %.6f MB, new samples are ignored\n"
-				, m_requestSampleBytes / 1e6
-			);
-			m_lastWarnSampleBytes = m_requestSampleBytes;
-			m_warnWindowSize *= 1.618;
-		}
-		return;
-	}
-	if (Options::kSortNone != m_opt.sampleSort) {
-		m_posLen.push_back({uint32_t(m_strDict.size()), uint32_t(rSize)});
-	}
-	m_strDict.append(rData, rSize);
+    m_sampleNumber++;
+    m_requestSampleBytes += rSize;
+    if (m_strDict.size() + rSize >= INT32_MAX) {
+        if (m_requestSampleBytes - m_lastWarnSampleBytes > m_warnWindowSize) {
+            fprintf(stderr, "WARN: ZipBuilder::addSample:"
+                " m_requestSampleBytes = %.6f MB, new samples are ignored\n"
+                , m_requestSampleBytes / 1e6
+            );
+            m_lastWarnSampleBytes = m_requestSampleBytes;
+            m_warnWindowSize *= 1.618;
+        }
+        return;
+    }
+    if (Options::kSortNone != m_opt.sampleSort) {
+        m_posLen.push_back({uint32_t(m_strDict.size()), uint32_t(rSize)});
+    }
+    m_strDict.append(rData, rSize);
 }
 
 /// @sample will be cleared, memory ownershipt is taken by m_strDict
 void DictZipBlobStoreBuilder::useSample(valvec<byte>& sample) {
-	if (m_strDict.size()) {
-		THROW_STD(invalid_argument, "m_strDict is not empty: size = %zd", m_strDict.size());
-	}
-	m_strDict.clear();
-	m_strDict.swap(sample);
-	m_zipStat.sampleTime = g_pf.sf(m_sampleStartTime, g_pf.now());
+    if (m_strDict.size()) {
+        THROW_STD(invalid_argument, "m_strDict is not empty: size = %zd", m_strDict.size());
+    }
+    m_strDict.clear();
+    m_strDict.swap(sample);
+    m_zipStat.sampleTime = g_pf.sf(m_sampleStartTime, g_pf.now());
     m_dictXXHash = AbstractBlobStore::Dictionary(m_strDict).xxhash;
 }
 
 void DictZipBlobStoreBuilder::finishSample() {
-	ullong t1 = g_pf.now();
-	m_strDict.shrink_to_fit();
-	m_posLen.shrink_to_fit();
-	m_zipStat.sampleTime = g_pf.sf(m_sampleStartTime, t1);
+    ullong t1 = g_pf.now();
+    m_strDict.shrink_to_fit();
+    m_posLen.shrink_to_fit();
+    m_zipStat.sampleTime = g_pf.sf(m_sampleStartTime, t1);
     m_dictXXHash = AbstractBlobStore::Dictionary(m_strDict).xxhash;
 }
 
 void DictZipBlobStoreBuilder::dictSwapOut(fstring fname) {
-	FileStream f(fname, "wb");
-	size_t suffixArrayBytes = m_strDict.capacity();
-	f.ensureWrite(m_strDict.data(), suffixArrayBytes);
-	free(m_strDict.data());
-	m_strDict.risk_set_data(nullptr);
-	m_dict->da_swapout(f);
+    FileStream f(fname, "wb");
+    size_t suffixArrayBytes = m_strDict.capacity();
+    f.ensureWrite(m_strDict.data(), suffixArrayBytes);
+    free(m_strDict.data());
+    m_strDict.risk_set_data(nullptr);
+    m_dict->da_swapout(f);
 }
 
 void DictZipBlobStoreBuilder::dictSwapIn(fstring fname) {
-	assert(m_strDict.data() == nullptr);
-	FileStream f(fname, "rb");
-	size_t suffixArrayBytes = m_strDict.capacity();
-	AutoFree<byte_t> sa(suffixArrayBytes);
-	f.ensureRead(sa.p, suffixArrayBytes);
-	m_dict->da_swapin(f);
-	m_strDict.risk_set_data(sa.release());
+    assert(m_strDict.data() == nullptr);
+    FileStream f(fname, "rb");
+    size_t suffixArrayBytes = m_strDict.capacity();
+    AutoFree<byte_t> sa(suffixArrayBytes);
+    f.ensureRead(sa.p, suffixArrayBytes);
+    m_dict->da_swapin(f);
+    m_strDict.risk_set_data(sa.release());
 }
 
 class DictZipBlobStoreBuilder::SingleThread : public DictZipBlobStoreBuilder {
-	HashTable m_hash;
-	NativeDataOutput<AutoGrownMemIO> m_dio;
+    HashTable m_hash;
+    NativeDataOutput<AutoGrownMemIO> m_dio;
 public:
-	explicit SingleThread(const DictZipBlobStore::Options& opt)
-	  : DictZipBlobStoreBuilder(opt) {}
+    explicit SingleThread(const DictZipBlobStore::Options& opt)
+      : DictZipBlobStoreBuilder(opt) {}
 
     void prepareZip() override {
         m_xxhash64.reset(g_dzbsnark_seed);
     }
-	void finishZip() override {
-		m_hash.link.clear();
-		m_hash.tabl.clear();
-		m_dio.clear();
-	}
-	// rSize can be 0 for this function
-	void addRecord(const byte* rData, size_t rSize) override {
-		assert(m_dio.tell() == 0);
-		if (m_entropyZipDataBase) {
-			// entropyZip is the second pass
-			size_t maxBytes = align_up(FSE_compressBound(rSize), 4);
-			m_hash.tabl.resize_no_init(maxBytes/4);
-			m_hash.link.resize_no_init(maxBytes/4);
-			bool zip = entropyZip(rData, rSize, *GetTlsTerarkContext(), m_dio);
-			memcpy(m_entropyZipDataBase + m_zipDataSize, m_dio.begin(), m_dio.tell());
-			m_xxhash64.update(m_dio.begin(), m_dio.tell());
-			m_entropyBitmap.push_back(zip);
-		}
-		else {
-			zipRecord(rData, rSize, m_hash, m_dio);
-	        g_dataThroughBytes.fetch_add(rSize, std::memory_order_relaxed);
-			if (m_opt.kNoEntropy == m_opt.entropyAlgo) {
-				m_xxhash64.update(m_dio.begin(), m_dio.tell());
-			}
+    void finishZip() override {
+        m_hash.link.clear();
+        m_hash.tabl.clear();
+        m_dio.clear();
+    }
+    // rSize can be 0 for this function
+    void addRecord(const byte* rData, size_t rSize) override {
+        assert(m_dio.tell() == 0);
+        if (m_entropyZipDataBase) {
+            // entropyZip is the second pass
+            size_t maxBytes = align_up(FSE_compressBound(rSize), 4);
+            m_hash.tabl.resize_no_init(maxBytes/4);
+            m_hash.link.resize_no_init(maxBytes/4);
+            bool zip = entropyZip(rData, rSize, *GetTlsTerarkContext(), m_dio);
+            memcpy(m_entropyZipDataBase + m_zipDataSize, m_dio.begin(), m_dio.tell());
+            m_xxhash64.update(m_dio.begin(), m_dio.tell());
+            m_entropyBitmap.push_back(zip);
+        }
+        else {
+            zipRecord(rData, rSize, m_hash, m_dio);
+            g_dataThroughBytes.fetch_add(rSize, std::memory_order_relaxed);
+            if (m_opt.kNoEntropy == m_opt.entropyAlgo) {
+                m_xxhash64.update(m_dio.begin(), m_dio.tell());
+            }
             if (m_onFinishEachValue) {
                 fstring raw(rData, rSize);
                 fstring zip(m_dio.begin(), m_dio.tell());
                 m_onFinishEachValue(raw, zip);
             }
             m_fpWriter.ensureWrite(m_dio.begin(), m_dio.tell());
-		}
+        }
         if (m_freq_hist) {
             if (m_opt.checksumLevel == 2) {
                 assert(m_dio.tell() == 0 || m_dio.tell() >= 4);
@@ -577,15 +582,15 @@ public:
                 m_freq_hist->add_record(fstring(m_dio.begin(), m_dio.tell()));
             }
         }
-		m_zipDataSize += m_dio.tell();
-		m_unzipSize += rSize;
+        m_zipDataSize += m_dio.tell();
+        m_unzipSize += rSize;
         m_lengthWriter << var_uint64_t(m_dio.tell());
         ++m_lengthCount;
-		m_dio.rewind();
-	}
-	using DictZipBlobStore::ZipBuilder::addRecord;
-	byte_t* addRecord(size_t) final { TERARK_DIE("Not supported"); }
-	bool isMultiThread() const final { return false; }
+        m_dio.rewind();
+    }
+    using DictZipBlobStore::ZipBuilder::addRecord;
+    byte_t* addRecord(size_t) final { TERARK_DIE("Not supported"); }
+    bool isMultiThread() const final { return false; }
 };
 
 static int& g_zipThreads() {
@@ -594,17 +599,18 @@ static int& g_zipThreads() {
 }
 static bool g_isPipelineStarted = false;
 
+static int g_debugLevel = (int)getEnvLong("DictZipBlobStore_debugLevel", 0);
 static int g_pipelineLogLevel = (int)getEnvLong("DictZipBlobStore_pipelineLogLevel", 1);
 static bool g_printEntropyCount = getEnvBool("DictZipBlobStore_printEntropyCount", false);
 
 TERARK_DLL_EXPORT void DictZipBlobStore_setZipThreads(int zipThreads) {
-	if (g_isPipelineStarted) {
-		fprintf(stderr,
-			"WARN: DictZipBlobStore pipeline has started, can not change zipThreads\n");
-	}
-	else {
-		g_zipThreads() = zipThreads;
-	}
+    if (g_isPipelineStarted) {
+        fprintf(stderr,
+            "WARN: DictZipBlobStore pipeline has started, can not change zipThreads\n");
+    }
+    else {
+        g_zipThreads() = zipThreads;
+    }
 }
 
 TERARK_DLL_EXPORT void DictZipBlobStore_setPipelineLogLevel(int level) {
@@ -618,90 +624,90 @@ TERARK_DLL_EXPORT void DictZipBlobStore_setPipelineLogLevel(int level) {
 }
 
 class DictZipBlobStoreBuilder::MultiThread : public DictZipBlobStoreBuilder {
-	class MyTask : public PipelineTask {
-	public:
-		MultiThread* builder;
-		size_t  firstRecId;
-		int     num;
-		int     cap;
-		valvec<byte_t> ibuf;
-		NativeDataOutput<AutoGrownMemIO> obuf;
-		uint32_t offsets[1];
+    class MyTask : public PipelineTask {
+    public:
+        MultiThread* builder;
+        size_t  firstRecId;
+        int     num;
+        int     cap;
+        valvec<byte_t> ibuf;
+        NativeDataOutput<AutoGrownMemIO> obuf;
+        uint32_t offsets[1];
 
-		MyTask(MultiThread* b, size_t recId, const byte_t* rec, int memsize) {
-			builder = b;
-			firstRecId = recId;
-			num = 0;
-			cap = int((memsize - sizeof(MyTask))*8/33) - 1;
-			if (b->m_opt.inputIsPerm) {
-			    assert(nullptr != rec);
-			    ibuf.risk_set_data((byte_t*)rec);
-			    ibuf.risk_set_capacity(b->m_opt.bytesPerBatch);
-			} else {
-			    ibuf.reserve(b->m_opt.bytesPerBatch);
-			}
-			// offsets & entropyBitmap
-			memset(offsets, 0, memsize - sizeof(MyTask) + sizeof(offsets));
-		}
-		~MyTask() override {
-		    if (builder->m_opt.inputIsPerm) {
-		        ibuf.risk_release_ownership();
-		    }
-		}
-		const byte_t* lastRecEnd() const {
-		    return ibuf.data() + offsets[num];
-		}
-		terark_forceinline fstring nthRecord(size_t nth) const {
-		    TERARK_ASSERT_LT(int(nth), num);
-		    size_t off0 = offsets[nth+0];
-		    size_t off1 = offsets[nth+1];
-		    return fstring(ibuf.data() + off0, off1 - off0);
-		}
-		uint32_t* entropyBitmap() { return offsets + cap + 1; }
-	};
-	class MyZipStage : public PipelineStage {
-	public:
-		explicit MyZipStage(int threadcnt) : PipelineStage(threadcnt) {
-			this->m_step_name = "ZipInputData";
-		}
-		void process(int threadno, PipelineQueueItem* task) override;
-	};
-	class MyWriteStage : public PipelineStage {
-	public:
-		MyWriteStage() : PipelineStage(0) {
-			this->m_step_name = "WriteZipData";
-		}
-		void process(int threadno, PipelineQueueItem* task) override;
-	};
-	class MyPipeline : public PipelineProcessor {
-	public:
-		int zipThreads;
-		MyPipeline() {
-			using namespace std;
-			int cpuCount = this->sysCpuCount();
-			if (g_zipThreads() > 0) {
-				zipThreads = min(cpuCount, g_zipThreads());
-			}
-			else {
-				zipThreads = min(cpuCount, 8);
-			}
-			this->setLogLevel(g_pipelineLogLevel);
-			this->setQueueSize(8*zipThreads);
-			this->add_step(new MyZipStage(zipThreads));
-			this->add_step(new MyWriteStage());
-			this->compile();
-			g_isPipelineStarted = true;
-		}
-		~MyPipeline() {
-			this->stop();
-			this->wait();
-		}
-		void destroyTask(PipelineTask* task) override {
-		    auto t = static_cast<MyTask*>(task); // NOLINT
-		    t->~MyTask();
-		    free(t);
-		}
-	};
+        MyTask(MultiThread* b, size_t recId, const byte_t* rec, int memsize) {
+            builder = b;
+            firstRecId = recId;
+            num = 0;
+            cap = int((memsize - sizeof(MyTask))*8/33) - 1;
+            if (b->m_opt.inputIsPerm) {
+                assert(nullptr != rec);
+                ibuf.risk_set_data((byte_t*)rec);
+                ibuf.risk_set_capacity(b->m_opt.bytesPerBatch);
+            } else {
+                ibuf.reserve(b->m_opt.bytesPerBatch);
+            }
+            // offsets & entropyBitmap
+            memset(offsets, 0, memsize - sizeof(MyTask) + sizeof(offsets));
+        }
+        ~MyTask() override {
+            if (builder->m_opt.inputIsPerm) {
+                ibuf.risk_release_ownership();
+            }
+        }
+        const byte_t* lastRecEnd() const {
+            return ibuf.data() + offsets[num];
+        }
+        terark_forceinline fstring nthRecord(size_t nth) const {
+            TERARK_ASSERT_LT(int(nth), num);
+            size_t off0 = offsets[nth+0];
+            size_t off1 = offsets[nth+1];
+            return fstring(ibuf.data() + off0, off1 - off0);
+        }
+        uint32_t* entropyBitmap() { return offsets + cap + 1; }
+    };
+    class MyZipStage : public PipelineStage {
+    public:
+        explicit MyZipStage(int threadcnt) : PipelineStage(threadcnt) {
+            this->m_step_name = "ZipInputData";
+        }
+        void process(int threadno, PipelineQueueItem* task) override;
+    };
+    class MyWriteStage : public PipelineStage {
+    public:
+        MyWriteStage() : PipelineStage(0) {
+            this->m_step_name = "WriteZipData";
+        }
+        void process(int threadno, PipelineQueueItem* task) override;
+    };
+    class MyPipeline : public PipelineProcessor {
+    public:
+        int zipThreads;
+        MyPipeline() {
+            using namespace std;
+            int cpuCount = this->sysCpuCount();
+            if (g_zipThreads() > 0) {
+                zipThreads = min(cpuCount, g_zipThreads());
+            }
+            else {
+                zipThreads = min(cpuCount, 8);
+            }
+            this->setLogLevel(g_pipelineLogLevel);
+            this->setQueueSize(8*zipThreads);
+            this->add_step(new MyZipStage(zipThreads));
+            this->add_step(new MyWriteStage());
+            this->compile();
+            g_isPipelineStarted = true;
+        }
+        ~MyPipeline() {
+            this->stop();
+            this->wait();
+        }
+        void destroyTask(PipelineTask* task) override {
+            auto t = static_cast<MyTask*>(task); // NOLINT
+            t->~MyTask();
+            free(t);
+        }
+    };
     MyTask* newTask(const byte_t* firstPermRec) {
         // cap is an advise, the real cap is greater or equal than 'cap' here.
         // the real record num in this task will be less or equal than real cap
@@ -716,87 +722,87 @@ class DictZipBlobStoreBuilder::MultiThread : public DictZipBlobStoreBuilder {
 #endif
         return new(t)MyTask(this, m_inputRecords, firstPermRec, len);
     }
-	static MyPipeline& getPipeline() { static MyPipeline p; return p; }
+    static MyPipeline& getPipeline() { static MyPipeline p; return p; }
 
-	valvec<HashTable> m_hash;
-	size_t m_inputRecords;
-	MyTask* m_curTask;
-	MyPipeline* m_pipeline;
-	valvec<MyTask*> m_lake;
-	size_t m_lakeBytes = 0;
+    valvec<HashTable> m_hash;
+    size_t m_inputRecords;
+    MyTask* m_curTask;
+    MyPipeline* m_pipeline;
+    valvec<MyTask*> m_lake;
+    size_t m_lakeBytes = 0;
 
 public:
-	explicit MultiThread(const DictZipBlobStore::Options& opt)
-	: DictZipBlobStoreBuilder(opt) {
-		m_curTask = nullptr;
-		m_pipeline = &getPipeline(); // access m_pipeline is faster
-		if (opt.enableLake) {
-			m_lake.reserve(m_pipeline->getQueueSize());
-		}
-	}
-	void finishZip() override {
-		if (m_opt.enableLake) {
-			if (m_curTask && m_curTask->num) {
-				m_lake.push_back(m_curTask);
-				m_curTask = nullptr;
-			}
-			drainLake();
-		} else {
-			if (m_curTask && m_curTask->num) {
-				m_pipeline->enqueue(m_curTask);
-			}
-		}
-		while (m_lengthCount < m_inputRecords) {
+    explicit MultiThread(const DictZipBlobStore::Options& opt)
+    : DictZipBlobStoreBuilder(opt) {
+        m_curTask = nullptr;
+        m_pipeline = &getPipeline(); // access m_pipeline is faster
+        if (opt.enableLake) {
+            m_lake.reserve(m_pipeline->getQueueSize());
+        }
+    }
+    void finishZip() override {
+        if (m_opt.enableLake) {
+            if (m_curTask && m_curTask->num) {
+                m_lake.push_back(m_curTask);
+                m_curTask = nullptr;
+            }
+            drainLake();
+        } else {
+            if (m_curTask && m_curTask->num) {
+                m_pipeline->enqueue(m_curTask);
+            }
+        }
+        while (m_lengthCount < m_inputRecords) {
 #if defined(_WIN32) || defined(_WIN64)
-			::Sleep(20);
+            ::Sleep(20);
 #else
-			::usleep(20000);
+            ::usleep(20000);
 #endif
-		//  pre g++-4.8 has no sleep_for
-		//	std::this_thread::sleep_for(std::chrono::microseconds(20));
-		}
-		m_curTask = NULL;
-		m_hash.clear();
-	}
-	void prepareZip() override {
-		m_inputRecords = 0;
-		m_hash.resize(m_pipeline->zipThreads);
+        //  pre g++-4.8 has no sleep_for
+        //    std::this_thread::sleep_for(std::chrono::microseconds(20));
+        }
+        m_curTask = NULL;
+        m_hash.clear();
+    }
+    void prepareZip() override {
+        m_inputRecords = 0;
+        m_hash.resize(m_pipeline->zipThreads);
         m_xxhash64.reset(g_dzbsnark_seed);
-	}
+    }
 
-	void drainLake() {
-		{
-			// serialize pipeline enqueue
-			//
-			// when there are multiple builders concurrently addRecord,
-			// the compressing stage in pipeline will work concurrently
-			// for these builders, each builder consumes many CPU Cache
-			// especially L3 cache which shared by multiple CPU core on
-			// one CPU socket/die!
-			m_pipeline->enqueue((PipelineTask**)m_lake.data(), m_lake.size());
-		}
-		m_lake.erase_all();
-		m_lakeBytes = 0;
-	}
+    void drainLake() {
+        {
+            // serialize pipeline enqueue
+            //
+            // when there are multiple builders concurrently addRecord,
+            // the compressing stage in pipeline will work concurrently
+            // for these builders, each builder consumes many CPU Cache
+            // especially L3 cache which shared by multiple CPU core on
+            // one CPU socket/die!
+            m_pipeline->enqueue((PipelineTask**)m_lake.data(), m_lake.size());
+        }
+        m_lake.erase_all();
+        m_lakeBytes = 0;
+    }
 
-	void addRecord(const byte* rData, size_t rSize) override {
+    void addRecord(const byte* rData, size_t rSize) override {
         // TERARK_ASSERT_GT(rSize, 0); // rSize == 0 is allowed
         MyTask* task = getTask(rData, rSize);
-		if (m_opt.inputIsPerm) {
-		    // all input record(rData, rSize) are tightly concatenated, so
-		    // current rData is equal to previous record end, we verify the
-		    // the assertion to detect caller's violation of this rule.
-		    TERARK_VERIFY_EQ(task->lastRecEnd(), rData);
-		    task->ibuf.risk_set_size(task->ibuf.size() + rSize);
-		    // after risk_set_size, ibuf.size() maybe > ibuf.capacity(),
-		    // that's ok
-		} else {
-		    task->ibuf.append(rData, rSize);
-		}
-		task->offsets[++task->num] = task->ibuf.size();
-		this->m_unzipSize += rSize;
-		this->m_inputRecords++;
-	}
+        if (m_opt.inputIsPerm) {
+            // all input record(rData, rSize) are tightly concatenated, so
+            // current rData is equal to previous record end, we verify the
+            // the assertion to detect caller's violation of this rule.
+            TERARK_VERIFY_EQ(task->lastRecEnd(), rData);
+            task->ibuf.risk_set_size(task->ibuf.size() + rSize);
+            // after risk_set_size, ibuf.size() maybe > ibuf.capacity(),
+            // that's ok
+        } else {
+            task->ibuf.append(rData, rSize);
+        }
+        task->offsets[++task->num] = task->ibuf.size();
+        this->m_unzipSize += rSize;
+        this->m_inputRecords++;
+    }
 
     // same as addRecord(rData, rSize) but reduce one memcpy
     byte_t* addRecord(size_t rSize) final {
@@ -811,26 +817,26 @@ public:
 
     terark_forceinline
     MyTask* getTask(const byte* rData, size_t rSize) {
-	    const size_t lake_MAX_BYTES = m_pipeline->zipThreads * 1024 * 1024;
-		MyTask* task = m_curTask;
+        const size_t lake_MAX_BYTES = m_pipeline->zipThreads * 1024 * 1024;
+        MyTask* task = m_curTask;
         assert(!task || task->num <= task->cap);
         if (terark_unlikely(!task)) {
-			m_curTask = task = newTask(rData);
+            m_curTask = task = newTask(rData);
         }
-		else if (task->num == task->cap ||
+        else if (task->num == task->cap ||
                     (task->num && task->ibuf.unused() < rSize)) {
             TERARK_ASSERT_EQ(task->offsets[task->num], task->ibuf.size());
-			if (m_opt.enableLake) {
-				if (m_lake.full() || m_lakeBytes >= lake_MAX_BYTES) {
-					drainLake();
-				}
-				m_lakeBytes += task->ibuf.size();
-				m_lake.push_back(task);
-			} else {
-				m_pipeline->enqueue(task);
-			}
-			m_curTask = task = newTask(rData);
-		}
+            if (m_opt.enableLake) {
+                if (m_lake.full() || m_lakeBytes >= lake_MAX_BYTES) {
+                    drainLake();
+                }
+                m_lakeBytes += task->ibuf.size();
+                m_lake.push_back(task);
+            } else {
+                m_pipeline->enqueue(task);
+            }
+            m_curTask = task = newTask(rData);
+        }
         TERARK_ASSERT_EQ(task->offsets[task->num], task->ibuf.size());
         return task;
     }
@@ -841,47 +847,47 @@ public:
 void
 DictZipBlobStoreBuilder::MultiThread::
 MyZipStage::process(int tno, PipelineQueueItem* item) {
-	MyTask* task = static_cast<MyTask*>(item->task);
-	auto  builder = task->builder;
-	auto& hash = builder->m_hash[tno];
-	assert(tno < (int)builder->m_hash.size());
-	assert(task->obuf.tell() == 0);
-	const size_t num = task->num;
-	if (builder->m_entropyZipDataBase) {
+    MyTask* task = static_cast<MyTask*>(item->task);
+    auto  builder = task->builder;
+    auto& hash = builder->m_hash[tno];
+    assert(tno < (int)builder->m_hash.size());
+    assert(task->obuf.tell() == 0);
+    const size_t num = task->num;
+    if (builder->m_entropyZipDataBase) {
         // reserve same of input data for zipped data memory
-        task->obuf.resize(task->ibuf.size());
-	    auto ctx = GetTlsTerarkContext();
-	    auto entropyBitmap = task->entropyBitmap();
-		for(size_t i = 0; i < num; ++i) {
-			fstring rec = task->nthRecord(i);
-			bool zip = builder->entropyZip(rec.udata(), rec.size(),
-				*ctx, task->obuf);
-			terark_bit_set_val(entropyBitmap, i, zip);
-			task->offsets[i] = uint32_t(task->obuf.tell());
-		}
-	}
-	else {
+        task->obuf.reserve(task->ibuf.size());
+        auto ctx = GetTlsTerarkContext();
+        auto entropyBitmap = task->entropyBitmap();
+        for(size_t i = 0; i < num; ++i) {
+            fstring rec = task->nthRecord(i);
+            bool zip = builder->entropyZip(rec.udata(), rec.size(),
+                *ctx, task->obuf);
+            terark_bit_set_val(entropyBitmap, i, zip);
+            task->offsets[i] = uint32_t(task->obuf.tell());
+        }
+    }
+    else {
         // reserve 1/2 of input data for zipped data memory
-        task->obuf.resize(task->ibuf.size() / 2);
-		for(size_t i = 0; i < num; ++i) {
-			fstring rec = task->nthRecord(i);
-			builder->zipRecord(rec.udata(), rec.size(), hash, task->obuf);
-			task->offsets[i] = uint32_t(task->obuf.tell());
-		}
-		g_dataThroughBytes.fetch_add(task->ibuf.size(), std::memory_order_relaxed);
-	}
+        task->obuf.reserve(task->ibuf.size() / 2);
+        for(size_t i = 0; i < num; ++i) {
+            fstring rec = task->nthRecord(i);
+            builder->zipRecord(rec.udata(), rec.size(), hash, task->obuf);
+            task->offsets[i] = uint32_t(task->obuf.tell());
+        }
+        g_dataThroughBytes.fetch_add(task->ibuf.size(), std::memory_order_relaxed);
+    }
 }
 
 void
 DictZipBlobStoreBuilder::MultiThread::
 MyWriteStage::process(int tno, PipelineQueueItem* item) {
-	MyTask* task = static_cast<MyTask*>(item->task);
-	auto builder = task->builder;
-	auto taskOffsets = task->offsets;
-	auto taskZipData = task->obuf.begin();
-	size_t taskZipSize = task->obuf.tell();
-	size_t baseZipSize = builder->m_zipDataSize;
-	assert(0 == tno);
+    MyTask* task = static_cast<MyTask*>(item->task);
+    auto builder = task->builder;
+    auto taskOffsets = task->offsets;
+    auto taskZipData = task->obuf.begin();
+    size_t taskZipSize = task->obuf.tell();
+    size_t baseZipSize = builder->m_zipDataSize;
+    assert(0 == tno);
     size_t taskRecNum = task->num;
     if (builder->m_onFinishEachValue) {
         // TODO: now zipped offsets reuse input offsets
@@ -894,30 +900,30 @@ MyWriteStage::process(int tno, PipelineQueueItem* item) {
             off0 = off1;
         }
     }
-	if (byte* ebase = builder->m_entropyZipDataBase) {
-		assert(builder->m_opt.kNoEntropy != builder->m_opt.entropyAlgo);
-		memcpy(ebase + baseZipSize, task->obuf.begin(), taskZipSize);
-		auto bitmap = task->entropyBitmap();
-		for (size_t i = 0; i < taskRecNum; ++i)
+    if (byte* ebase = builder->m_entropyZipDataBase) {
+        assert(builder->m_opt.kNoEntropy != builder->m_opt.entropyAlgo);
+        memcpy(ebase + baseZipSize, task->obuf.begin(), taskZipSize);
+        auto bitmap = task->entropyBitmap();
+        for (size_t i = 0; i < taskRecNum; ++i)
             builder->m_entropyBitmap.push_back(terark_bit_test(bitmap, i));
-		builder->m_xxhash64.update(task->obuf.begin(), taskZipSize);
-	}
-	else {
-		if (builder->m_opt.kNoEntropy == builder->m_opt.entropyAlgo) {
-			builder->m_xxhash64.update(task->obuf.begin(), taskZipSize);
-		}
+        builder->m_xxhash64.update(task->obuf.begin(), taskZipSize);
+    }
+    else {
+        if (builder->m_opt.kNoEntropy == builder->m_opt.entropyAlgo) {
+            builder->m_xxhash64.update(task->obuf.begin(), taskZipSize);
+        }
         builder->m_fpWriter.ensureWrite(task->obuf.begin(), taskZipSize);
-	}
+    }
 #if 0
-	fprintf(stderr
-		, "DictZip::WriteStage: baseZipSize=%zd taskZipSize=%zd taskRecNum=%zd firstRecId=%zd\n"
-		, baseZipSize, taskZipSize, taskRecNum, task->firstRecId
-		);
+    fprintf(stderr
+        , "DictZip::WriteStage: baseZipSize=%zd taskZipSize=%zd taskRecNum=%zd firstRecId=%zd\n"
+        , baseZipSize, taskZipSize, taskRecNum, task->firstRecId
+        );
 #endif
 #if !defined(NDEBUG)
-	for (size_t i = 1; i < taskRecNum; ++i) {
-		assert(taskOffsets[i-1] <= taskOffsets[i]); // can be empty
-	}
+    for (size_t i = 1; i < taskRecNum; ++i) {
+        assert(taskOffsets[i-1] <= taskOffsets[i]); // can be empty
+    }
 #endif
     if (builder->m_freq_hist) {
         auto freq_hist = builder->m_freq_hist;
@@ -936,10 +942,10 @@ MyWriteStage::process(int tno, PipelineQueueItem* item) {
         }
     }
     builder->m_lengthWriter << var_uint64_t(taskOffsets[0]);
-	for (size_t i = 1; i < taskRecNum; ++i) {
+    for (size_t i = 1; i < taskRecNum; ++i) {
         builder->m_lengthWriter << var_uint64_t(taskOffsets[i] - taskOffsets[i - 1]);
-	}
-	builder->m_zipDataSize += taskZipSize;
+    }
+    builder->m_zipDataSize += taskZipSize;
     builder->m_lengthCount += taskRecNum;
 }
 
@@ -947,20 +953,20 @@ bool
 DictZipBlobStoreBuilder::entropyZip(const byte* rData, size_t rSize,
                                     TerarkContext& context,
                                     NativeDataOutput<AutoGrownMemIO>& dio) {
-	if (0 == rSize) {
-		return false;
-	}
-	size_t dsize = rSize;
-	if (m_opt.checksumLevel == 2) {
-		assert(rSize > 4);
-		dsize -= 4;
-		uint32_t crc1 = unaligned_load<uint32_t>(rData + dsize);
-		uint32_t crc2 = Crc32c_update(0, rData, dsize);
-		if (crc2 != crc1) {
-			throw BadCrc32cException(
-				"DictZipBlobStoreBuilder::entropyZip", crc1, crc2);
-		}
-	}
+    if (0 == rSize) {
+        return false;
+    }
+    size_t dsize = rSize;
+    if (m_opt.checksumLevel == 2) {
+        assert(rSize > 4);
+        dsize -= 4;
+        uint32_t crc1 = unaligned_load<uint32_t>(rData + dsize);
+        uint32_t crc2 = Crc32c_update(0, rData, dsize);
+        if (crc2 != crc1) {
+            throw BadCrc32cException(
+                "DictZipBlobStoreBuilder::entropyZip", crc1, crc2);
+        }
+    }
     auto gtab = m_fse_gtable;
     auto zzn = size_t(0);
     const void* zzd = nullptr;
@@ -1004,25 +1010,25 @@ DictZipBlobStoreBuilder::entropyZip(const byte* rData, size_t rSize,
 terark_forceinline
 void
 DictZipBlobStoreBuilder::zipRecord(const byte* rData, size_t rSize,
-								   HashTable& hash,
-								   NativeDataOutput<AutoGrownMemIO>& dio) {
-	if (terark_unlikely(0 == rSize)) {
-		return;
-	}
-	size_t oldsize = dio.tell();
+                                   HashTable& hash,
+                                   NativeDataOutput<AutoGrownMemIO>& dio) {
+    if (terark_unlikely(0 == rSize)) {
+        return;
+    }
+    size_t oldsize = dio.tell();
 
-	if (m_opt.useSuffixArrayLocalMatch)
-		zipRecord_impl2<true>(rData, rSize, hash, dio);
-	else
-		zipRecord_impl2<false>(rData, rSize, hash, dio);
+    if (m_opt.useSuffixArrayLocalMatch)
+        zipRecord_impl2<true>(rData, rSize, hash, dio);
+    else
+        zipRecord_impl2<false>(rData, rSize, hash, dio);
 
-	if (m_opt.checksumLevel == 2) {
-		assert(dio.tell() > oldsize);
-		auto zdata = dio.begin() + oldsize;
-		auto zsize = dio.tell()  - oldsize;
-		uint32_t crc = Crc32c_update(0, zdata, zsize);
-		dio << crc;
-	}
+    if (m_opt.checksumLevel == 2) {
+        assert(dio.tell() > oldsize);
+        auto zdata = dio.begin() + oldsize;
+        auto zsize = dio.tell()  - oldsize;
+        uint32_t crc = Crc32c_update(0, zdata, zsize);
+        dio << crc;
+    }
 }
 
 template<uint32_t LowerBytes>
@@ -1307,15 +1313,15 @@ DictZipBlobStoreBuilder::zipRecord_impl2(const byte* rData, size_t rSize,
 DictZipBlobStore::ZipBuilder::~ZipBuilder() {}
 
 DictZipBlobStore::Options::Options() {
-	checksumLevel = 1;
-	maxMatchProbe = getEnvLong("DictZipBlobStore_MAX_PROBE", 0);
-	entropyAlgo = kNoEntropy;
-	sampleSort = kSortNone;
-	useSuffixArrayLocalMatch = false;
-	useNewRefEncoding = true;
-	compressGlobalDict = false;
+    checksumLevel = 1;
+    maxMatchProbe = getEnvLong("DictZipBlobStore_MAX_PROBE", 0);
+    entropyAlgo = kNoEntropy;
+    sampleSort = kSortNone;
+    useSuffixArrayLocalMatch = false;
+    useNewRefEncoding = true;
+    compressGlobalDict = false;
     entropyInterleaved = (uint8_t)getEnvLong("Entropy_interleaved", 8);
-	offsetArrayBlockUnits = 0; // default use UintVecMin0
+    offsetArrayBlockUnits = 0; // default use UintVecMin0
     entropyZipRatioRequire = (float)getEnvDouble("Entropy_zipRatioRequire", 0.92);
     embeddedDict = false;
     enableLake = false;
@@ -1328,36 +1334,36 @@ DictZipBlobStore::Options::Options() {
 }
 
 DictZipBlobStore::ZipStat::ZipStat() {
-	sampleTime = 0;
-	dictBuildTime = 0;
-	dictZipTime = 0;
-	dictFileTime = 0;
-	entropyBuildTime = 0;
-	entropyZipTime = 0;
-	pipelineThroughBytes = 0;
+    sampleTime = 0;
+    dictBuildTime = 0;
+    dictZipTime = 0;
+    dictFileTime = 0;
+    entropyBuildTime = 0;
+    entropyZipTime = 0;
+    pipelineThroughBytes = 0;
 }
 
 void DictZipBlobStore::ZipStat::print(FILE* fp) const {
-	double  sum = 0
-				+ sampleTime
-				+ dictBuildTime
-				+ dictZipTime
-				+ dictFileTime
-				+ entropyBuildTime
-				+ entropyZipTime
+    double  sum = 0
+                + sampleTime
+                + dictBuildTime
+                + dictZipTime
+                + dictFileTime
+                + entropyBuildTime
+                + entropyZipTime
                 + embedDictTime
-				;
-	fprintf(fp, "DictZipBlobStore::ZipState: timing(seconds):\n");
-	fprintf(fp, "             time seconds           %%\n");
-	fprintf(fp, "  sample        %9.3f     %6.2f%%\n", sampleTime      , 100*sampleTime      /sum);
-	fprintf(fp, "  dictBuild     %9.3f     %6.2f%%\n", dictBuildTime   , 100*dictBuildTime   /sum);
-	fprintf(fp, "  dictZip       %9.3f     %6.2f%%\n", dictZipTime     , 100*dictZipTime     /sum);
-	fprintf(fp, "  dictFile      %9.3f     %6.2f%%\n", dictFileTime    , 100*dictFileTime    /sum);
-	fprintf(fp, "  entropyBuild  %9.3f     %6.2f%%\n", entropyBuildTime, 100*entropyBuildTime/sum);
-	fprintf(fp, "  entropyZip    %9.3f     %6.2f%%\n", entropyZipTime  , 100*entropyZipTime  /sum);
+                ;
+    fprintf(fp, "DictZipBlobStore::ZipState: timing(seconds):\n");
+    fprintf(fp, "             time seconds           %%\n");
+    fprintf(fp, "  sample        %9.3f     %6.2f%%\n", sampleTime      , 100*sampleTime      /sum);
+    fprintf(fp, "  dictBuild     %9.3f     %6.2f%%\n", dictBuildTime   , 100*dictBuildTime   /sum);
+    fprintf(fp, "  dictZip       %9.3f     %6.2f%%\n", dictZipTime     , 100*dictZipTime     /sum);
+    fprintf(fp, "  dictFile      %9.3f     %6.2f%%\n", dictFileTime    , 100*dictFileTime    /sum);
+    fprintf(fp, "  entropyBuild  %9.3f     %6.2f%%\n", entropyBuildTime, 100*entropyBuildTime/sum);
+    fprintf(fp, "  entropyZip    %9.3f     %6.2f%%\n", entropyZipTime  , 100*entropyZipTime  /sum);
     fprintf(fp, "  embedDict     %9.3f     %6.2f%%\n", embedDictTime   , 100*embedDictTime   /sum);
-	fprintf(fp, "  sum of all    %9.3f     %6.2f%%\n", sum, 100.0);
-	fprintf(fp, "-----------------------------------------\n");
+    fprintf(fp, "  sum of all    %9.3f     %6.2f%%\n", sum, 100.0);
+    fprintf(fp, "-----------------------------------------\n");
 }
 
 ///@param crc32cLevel
@@ -1367,16 +1373,16 @@ void DictZipBlobStore::ZipStat::print(FILE* fp) const {
 DictZipBlobStore::ZipBuilder*
 DictZipBlobStore::createZipBuilder(const Options& opt) {
 #if 0
-	fprintf(stderr
-		, "DictZipBlobStore: checksumLevel = %d, useSuffixArrayLocalMatch = %d, MAX_PROBE = %d\n"
-		, opt.checksumLevel, opt.useSuffixArrayLocalMatch, opt.maxMatchProbe
-		);
+    fprintf(stderr
+        , "DictZipBlobStore: checksumLevel = %d, useSuffixArrayLocalMatch = %d, MAX_PROBE = %d\n"
+        , opt.checksumLevel, opt.useSuffixArrayLocalMatch, opt.maxMatchProbe
+        );
 #endif
-	// g_zipThreads() == 0 indicate SingleThread
-	if (g_isPipelineStarted || g_zipThreads())
-		return new DictZipBlobStoreBuilder::MultiThread(opt);
-	else
-		return new DictZipBlobStoreBuilder::SingleThread(opt);
+    // g_zipThreads() == 0 indicate SingleThread
+    if (g_isPipelineStarted || g_zipThreads())
+        return new DictZipBlobStoreBuilder::MultiThread(opt);
+    else
+        return new DictZipBlobStoreBuilder::SingleThread(opt);
 }
 
 DictZipBlobStore::MyBuilder::~MyBuilder() {
@@ -1414,26 +1420,26 @@ void DictZipBlobStore::MyBuilder::finish() {
 
 #pragma pack(push,8)
 struct DictZipBlobStore::FileHeader : public FileHeaderBase {
-	uint64_t offsetArrayBytes;
-	uint64_t ptrListBytes;
+    uint64_t offsetArrayBytes;
+    uint64_t ptrListBytes;
     uint08_t embeddedDict : 4;
     uint08_t embeddedDictAligned : 4;
     uint08_t pad0[3];
-	uint32_t entropyTableSize;
-	uint08_t offsetsUintBits;
-	uint08_t crc32cLevel;
-	uint08_t entropyAlgo;
-	uint08_t isNewRefEncoding : 1;
-	uint08_t entropyTableNoCompress : 1;
-	uint08_t pad1 : 2;
-	uint08_t zipOffsets_log2_blockUnits : 4; // 6 or 7
-	uint32_t entropyTableCRC;
-	uint64_t dictXXHash;
-	uint32_t offsetsCRC;
-	uint32_t headerCRC;
+    uint32_t entropyTableSize;
+    uint08_t offsetsUintBits;
+    uint08_t crc32cLevel;
+    uint08_t entropyAlgo;
+    uint08_t isNewRefEncoding : 1;
+    uint08_t entropyTableNoCompress : 1;
+    uint08_t pad1 : 2;
+    uint08_t zipOffsets_log2_blockUnits : 4; // 6 or 7
+    uint32_t entropyTableCRC;
+    uint64_t dictXXHash;
+    uint32_t offsetsCRC;
+    uint32_t headerCRC;
 
-	FileHeader&
-	patchCRC(const UintVecMin0& offsets, fstring entropyBitmap, fstring entropy, size_t maxOffsetEnt) {
+    FileHeader&
+    patchCRC(const UintVecMin0& offsets, fstring entropyBitmap, fstring entropy, size_t maxOffsetEnt) {
         if (entropyAlgo != Options::kNoEntropy) {
             entropyTableCRC = Crc32c_update(0, entropyBitmap.data(), entropyBitmap.size());
             entropyTableCRC = Crc32c_update(entropyTableCRC, entropy.data(), entropy.size());
@@ -1449,55 +1455,55 @@ struct DictZipBlobStore::FileHeader : public FileHeaderBase {
         offsetsCRC = Crc32c_update(0, offsets.data(), offsets.mem_size());
         headerCRC = Crc32c_update(0, this, sizeof(*this) - 4);
         return *this;
-	}
+    }
 
-	FileHeader(const DictZipBlobStore* store, size_t zipDataSize1, Dictionary dict
+    FileHeader(const DictZipBlobStore* store, size_t zipDataSize1, Dictionary dict
              , const UintVecMin0& offsets, fstring entropyBitmap, fstring entropyTab
              , size_t maxOffsetEnt) {
-		assert(dict.memory.size() > 0);
-		assert(dict.verified);
-		memset(this, 0, sizeof(*this));
-		magic_len = MagicStrLen;
-		strcpy(magic, MagicString);
-		strcpy(className, "DictZipBlobStore");
-		formatVersion = 1;
-		unzipSize  = store->m_unzipSize;
-		ptrListBytes = (zipDataSize1 + 15) & ~uint64_t(15);
+        assert(dict.memory.size() > 0);
+        assert(dict.verified);
+        memset(this, 0, sizeof(*this));
+        magic_len = MagicStrLen;
+        strcpy(magic, MagicString);
+        strcpy(className, "DictZipBlobStore");
+        formatVersion = 1;
+        unzipSize  = store->m_unzipSize;
+        ptrListBytes = (zipDataSize1 + 15) & ~uint64_t(15);
         embeddedDict = 0;
         embeddedDictAligned = 0;
         entropyTableSize = entropyTab.size();
-		crc32cLevel = byte_t(store->m_checksumLevel);
-		entropyAlgo = byte_t(store->m_entropyAlgo);
-		isNewRefEncoding = 1; // now always 1
+        crc32cLevel = byte_t(store->m_checksumLevel);
+        entropyAlgo = byte_t(store->m_entropyAlgo);
+        isNewRefEncoding = 1; // now always 1
         entropyTableNoCompress = 0; // default 0, compress entropy table
-		globalDictSize = dict.memory.size();
-		dictXXHash = dict.xxhash;
-		patchCRC(offsets, entropyBitmap, entropyTab, maxOffsetEnt);
-	}
+        globalDictSize = dict.memory.size();
+        dictXXHash = dict.xxhash;
+        patchCRC(offsets, entropyBitmap, entropyTab, maxOffsetEnt);
+    }
 
-	FileHeader(const DictZipBlobStore* store, size_t zipDataSize1, Dictionary dict
+    FileHeader(const DictZipBlobStore* store, size_t zipDataSize1, Dictionary dict
              , const UintVecMin0& offsets, fstring entropyBitmap, fstring entropyTab
              , uint08_t _entropyTableNoCompress, size_t maxOffsetEnt) {
-		assert(dict.memory.size() > 0);
-		assert(dict.verified);
-		memset(this, 0, sizeof(*this));
-		magic_len = MagicStrLen;
-		strcpy(magic, MagicString);
-		strcpy(className, "DictZipBlobStore");
-		formatVersion = 1;
-		unzipSize  = store->m_unzipSize;
-		ptrListBytes = (zipDataSize1 + 15) & ~uint64_t(15);
+        assert(dict.memory.size() > 0);
+        assert(dict.verified);
+        memset(this, 0, sizeof(*this));
+        magic_len = MagicStrLen;
+        strcpy(magic, MagicString);
+        strcpy(className, "DictZipBlobStore");
+        formatVersion = 1;
+        unzipSize  = store->m_unzipSize;
+        ptrListBytes = (zipDataSize1 + 15) & ~uint64_t(15);
         embeddedDict = 0;
         embeddedDictAligned = 0;
         entropyTableSize = entropyTab.size();
-		crc32cLevel = byte_t(store->m_checksumLevel);
-		entropyAlgo = byte_t(store->m_entropyAlgo);
-		isNewRefEncoding = 1; // now always 1
+        crc32cLevel = byte_t(store->m_checksumLevel);
+        entropyAlgo = byte_t(store->m_entropyAlgo);
+        isNewRefEncoding = 1; // now always 1
         entropyTableNoCompress = _entropyTableNoCompress;
-		globalDictSize = dict.memory.size();
-		dictXXHash = dict.xxhash;
-		patchCRC(offsets, entropyBitmap, entropyTab, maxOffsetEnt);
-	}
+        globalDictSize = dict.memory.size();
+        dictXXHash = dict.xxhash;
+        patchCRC(offsets, entropyBitmap, entropyTab, maxOffsetEnt);
+    }
 
     void setEmbeddedDictType(size_t dictSize, EmbeddedDictType embeddedDictType) {
         size_t alignedDictSize = align_up(dictSize, 16);
@@ -1507,19 +1513,19 @@ struct DictZipBlobStore::FileHeader : public FileHeaderBase {
         headerCRC = Crc32c_update(0, this, sizeof(*this) - 4);
     }
 
-	uint64_t computeFileSize() const {
-		size_t offsetBytes = UintVecMin0::compute_mem_size(offsetsUintBits, records+1);
-		if (zipOffsets_log2_blockUnits) {
-			offsetBytes = offsetArrayBytes;
-		} else {
-			assert(offsetArrayBytes == offsetBytes);
-		}
+    uint64_t computeFileSize() const {
+        size_t offsetBytes = UintVecMin0::compute_mem_size(offsetsUintBits, records+1);
+        if (zipOffsets_log2_blockUnits) {
+            offsetBytes = offsetArrayBytes;
+        } else {
+            assert(offsetArrayBytes == offsetBytes);
+        }
         size_t entropyTableAlignedSize = align_up(entropyTableSize, 16);
         size_t entropyBitmapSIze = entropyAlgo == Options::kNoEntropy ? 0 :
             febitvec::s_mem_size(align_up(records, 16 * 8));
         return sizeof(FileHeader) + ptrListBytes + offsetBytes + entropyBitmapSIze
             + entropyTableAlignedSize + sizeof(BlobStoreFileFooter);
-	}
+    }
 
     fstring getEmbeddedDict() const {
         size_t alignedSize = fileSize - computeFileSize();
@@ -1528,9 +1534,9 @@ struct DictZipBlobStore::FileHeader : public FileHeaderBase {
         return fstring(end - alignedSize - sizeof(BlobStoreFileFooter), size);
     }
 
-	BlobStoreFileFooter* getFileFooter() const {
-		return (BlobStoreFileFooter*)((byte_t*)(this) + fileSize) - 1;
-	}
+    BlobStoreFileFooter* getFileFooter() const {
+        return (BlobStoreFileFooter*)((byte_t*)(this) + fileSize) - 1;
+    }
 };
 
 void DictZipBlobStore::destroyMe() {
@@ -1687,6 +1693,18 @@ WriteDict(fstring filename, size_t offset, fstring data, bool compress) {
 static
 AbstractBlobStore::MemoryCloseType
 ReadDict(fstring mem, AbstractBlobStore::Dictionary& dict, fstring dictFile) {
+    auto MmapColdizeBytes = [](const void* addr, size_t len) {
+        size_t low = terark::align_up(size_t(addr), 4096);
+        size_t hig = terark::align_down(size_t(addr) + len, 4096);
+        if (low < hig) {
+            size_t size = hig - low;
+#ifdef MADV_DONTNEED
+            madvise((void*)low, size, MADV_DONTNEED);
+#elif defined(_MSC_VER) // defined(_WIN32) || defined(_WIN64)
+            VirtualUnlock((void*)low, size);
+#endif
+        }
+    };
     auto mmapBase = (const DictZipBlobStore::FileHeader*)mem.data();
     if (mmapBase->embeddedDict == (uint8_t)EmbeddedDictType::kExternal) {
         if (!dict.memory.empty()) {
@@ -1721,7 +1739,7 @@ ReadDict(fstring mem, AbstractBlobStore::Dictionary& dict, fstring dictFile) {
         dictMmap.base = nullptr;
         return AbstractBlobStore::MemoryCloseType::MmapClose;
     }
-    fstring dictMem = mmapBase->getEmbeddedDict();
+    const fstring dictMem = mmapBase->getEmbeddedDict();
     if (mmapBase->embeddedDict == (uint8_t)EmbeddedDictType::kRaw) {
         assert(dictMem.size() == mmapBase->globalDictSize);
         dict = AbstractBlobStore::Dictionary(dictMem);
@@ -1745,21 +1763,11 @@ ReadDict(fstring mem, AbstractBlobStore::Dictionary& dict, fstring dictFile) {
             , ZSTD_getErrorName(size));
     }
     TERARK_VERIFY_EQ(size, raw_size);
+    MmapColdizeBytes(dictMem.data(), dictMem.size());
     dict = AbstractBlobStore::Dictionary(output_dict);
     output_dict.risk_release_ownership();
     return AbstractBlobStore::MemoryCloseType::Clear;
 }
-
-struct InplaceUpdateBuffer {
-    byte_t* m_begin;
-    byte_t* m_end;
-    byte_t* m_pos;
-    struct RingBuffer {
-        valvec<byte_t> m_buffer;
-        size_t begin;
-        size_t end;
-    } m_buffer;
-};
 
 void DictZipBlobStoreBuilder::entropyStore(std::unique_ptr<terark::DictZipBlobStore> &store, terark::ullong &t2, terark::ullong &t3)
 {
@@ -1826,9 +1834,11 @@ void DictZipBlobStoreBuilder::entropyStore(std::unique_ptr<terark::DictZipBlobSt
                 m_fse_gtable = FSE_createCTable(tabLog, maxSym);
                 err = FSE_buildCTable(m_fse_gtable, c->norm, maxSym, tabLog);
                 if (FSE_isError(err)) {
+                  #if 0
                     fprintf(stderr
                         , "WARN: FSE_buildCTable() = %s, global entropy table will be disabled\n"
                         , FSE_getErrorName(err));
+                  #endif
                     FSE_freeCTable(m_fse_gtable);
                     m_fse_gtable = NULL;
                     unnecessary = true;
@@ -1902,8 +1912,7 @@ void DictZipBlobStoreBuilder::entropyStore(std::unique_ptr<terark::DictZipBlobSt
     prepareZip();
     bool isOffsetsZipped = store->offsetsIsSortedUintVec();
     for (size_t recId = 0; recId < store->m_numRecords; ++recId) {
-        size_t BegEnd[2];
-        store->offsetGet2(recId, BegEnd, isOffsetsZipped);
+        auto BegEnd = store->offsetGet2(recId, isOffsetsZipped);
         this->addRecord(storeBase + BegEnd[0], BegEnd[1] - BegEnd[0]);
     }
     this->finishZip();
@@ -1943,7 +1952,7 @@ void DictZipBlobStoreBuilder::entropyStore(std::unique_ptr<terark::DictZipBlobSt
         m_fpWriter.attach(&m_fp);
     }
     else {
-        m_memStream.stream()->resize(storeSize);
+        m_memStream.stream()->reserve(storeSize);
         m_memStream.seek(sizeof(FileHeader) + pos);
         m_fpWriter.attach(&m_memStream);
     }
@@ -1980,7 +1989,7 @@ void DictZipBlobStoreBuilder::entropyStore(std::unique_ptr<terark::DictZipBlobSt
                     result.size, result.uintbits);
             }
             else {
-                m_memStream.stream()->resize(storeSize);
+                m_memStream.stream()->reserve(storeSize);
                 zoffsets.risk_set_data(
                     m_memStream.stream()->begin() + sizeof(FileHeader) + pos,
                     result.size, result.uintbits);
@@ -2008,7 +2017,7 @@ void DictZipBlobStoreBuilder::entropyStore(std::unique_ptr<terark::DictZipBlobSt
                     fileSize);
             }
             else {
-                m_memStream.stream()->resize(storeSize);
+                m_memStream.stream()->reserve(storeSize);
                 szoffsets.risk_set_data(
                     m_memStream.stream()->begin() + sizeof(FileHeader) + pos,
                     fileSize);
@@ -2044,7 +2053,7 @@ void DictZipBlobStoreBuilder::entropyStore(std::unique_ptr<terark::DictZipBlobSt
     hp->crc32cLevel = m_opt.checksumLevel;
     pos += zoffsets.mem_size();
     assert(pos % 16 == 0);
-    //	m_entropyTableData.resize(align_up(m_entropyTableData.size(), 16), 0);
+    //    m_entropyTableData.resize(align_up(m_entropyTableData.size(), 16), 0);
     memcpy(storeBase + pos, m_entropyBitmap.data(), m_entropyBitmap.mem_size());
     pos += m_entropyBitmap.mem_size();
     memcpy(storeBase + pos, m_entropyTableData.data(), m_entropyTableData.size());
@@ -2088,7 +2097,7 @@ void DictZipBlobStoreBuilder::EmbedDict(std::unique_ptr<terark::DictZipBlobStore
     }
     else {
         size_t fileSize = m_memStream.size() + m_strDict.size();
-        m_memStream.stream()->resize(fileSize);
+        m_memStream.stream()->reserve(fileSize);
         auto hp = (FileHeader*)m_memStream.stream()->begin();
         BlobStoreFileFooter footer = *hp->getFileFooter();
         assert(fileSize == hp->fileSize + m_strDict.size());
@@ -2098,22 +2107,22 @@ void DictZipBlobStoreBuilder::EmbedDict(std::unique_ptr<terark::DictZipBlobStore
             if (!ZSTD_isError(zstd_size)) {
                 hp->setEmbeddedDictType(zstd_size, EmbeddedDictType::kZSTD);
                 *hp->getFileFooter() = footer;
-                m_memStream.stream()->resize(hp->fileSize);
+                m_memStream.stream()->reserve(hp->fileSize);
                 return;
             }
         }
         memcpy((byte_t*)hp->getFileFooter(), m_strDict.data(), m_strDict.size());
         hp->setEmbeddedDictType(m_strDict.size(), EmbeddedDictType::kRaw);
-        m_memStream.stream()->resize(hp->fileSize);
+        m_memStream.stream()->reserve(hp->fileSize);
         *hp->getFileFooter() = footer;
     }
 }
 
 void DictZipBlobStoreBuilder::finish(int flag) {
-	finishZip();
-	m_zipStat.pipelineThroughBytes = g_dataThroughBytes.load(std::memory_order_relaxed) - m_dataThroughBytesAtBegin;
-	ullong t1 = g_pf.now();
-	std::unique_ptr<DictZipBlobStore> store(new DictZipBlobStore());
+    finishZip();
+    m_zipStat.pipelineThroughBytes = g_dataThroughBytes.load(std::memory_order_relaxed) - m_dataThroughBytesAtBegin;
+    ullong t1 = g_pf.now();
+    std::unique_ptr<DictZipBlobStore> store(new DictZipBlobStore());
     if (flag & DictZipBlobStoreBuilder::FinishFreeDict) {
         m_dict.reset(); // free large memory
     }
@@ -2163,7 +2172,7 @@ void DictZipBlobStoreBuilder::finish(int flag) {
                     fileSize);
             }
             else {
-                m_memStream.stream()->resize(finalSize);
+                m_memStream.stream()->reserve(finalSize);
                 store->m_zOffsets.risk_set_data(
                     m_memStream.stream()->begin() + sizeof(FileHeader) + align_up(m_zipDataSize, 16),
                     fileSize);
@@ -2191,7 +2200,7 @@ void DictZipBlobStoreBuilder::finish(int flag) {
                     result.size, result.uintbits);
             }
             else {
-                m_memStream.stream()->resize(finalSize);
+                m_memStream.stream()->reserve(finalSize);
                 store->m_offsets.risk_set_data(
                     m_memStream.stream()->begin() + sizeof(FileHeader) + align_up(m_zipDataSize, 16),
                     result.size, result.uintbits);
@@ -2240,11 +2249,11 @@ void DictZipBlobStoreBuilder::finish(int flag) {
         }
         *hp->getFileFooter() = foot;
     }
-	store->m_strDict.clear();
-	store->m_offsets.clear();
-	store->m_ptrList.clear();
+    store->m_strDict.clear();
+    store->m_offsets.clear();
+    store->m_ptrList.clear();
 
-	ullong t2 = 0, t3 = 0;
+    ullong t2 = 0, t3 = 0;
 
     if (DictZipBlobStore::Options::kNoEntropy != m_opt.entropyAlgo) {
         entropyStore(store, t2, t3);
@@ -2252,17 +2261,17 @@ void DictZipBlobStoreBuilder::finish(int flag) {
     else {
         t3 = t2 = g_pf.now();
     }
-	ullong t4 = g_pf.now();
+    ullong t4 = g_pf.now();
     if (m_opt.embeddedDict) {
         EmbedDict(store);
     }
     ullong t5 = g_pf.now();
 
-	m_zipStat.dictBuildTime    = g_pf.sf(m_prepareStartTime, m_dictZipStartTime);
-	m_zipStat.dictZipTime      = g_pf.sf(m_dictZipStartTime, t1);
-	m_zipStat.dictFileTime     = g_pf.sf(t1, t2);
-	m_zipStat.entropyBuildTime = g_pf.sf(t2, t3);
-	m_zipStat.entropyZipTime   = g_pf.sf(t3, t4);
+    m_zipStat.dictBuildTime    = g_pf.sf(m_prepareStartTime, m_dictZipStartTime);
+    m_zipStat.dictZipTime      = g_pf.sf(m_dictZipStartTime, t1);
+    m_zipStat.dictFileTime     = g_pf.sf(t1, t2);
+    m_zipStat.entropyBuildTime = g_pf.sf(t2, t3);
+    m_zipStat.entropyZipTime   = g_pf.sf(t3, t4);
     m_zipStat.embedDictTime    = g_pf.sf(t4, t5);
 }
 
@@ -2295,73 +2304,74 @@ void DictZipBlobStore::init_from_memory(fstring dataMem, Dictionary dict) {
 }
 
 void DictZipBlobStore::setDataMemory(const void* base, size_t size) {
-	auto mmapBase = (const FileHeader*)base;
+    auto mmapBase = (const FileHeader*)base;
     m_mmapBase = mmapBase;
 
-	size_t size2 = mmapBase->computeFileSize();
+    size_t size2 = mmapBase->computeFileSize();
     if (mmapBase->embeddedDict == (uint8_t)EmbeddedDictType::kExternal) {
         TERARK_VERIFY_EQ(size2, size);
     }
-	TERARK_VERIFY_AL(mmapBase->ptrListBytes, 16);
-	m_unzipSize = mmapBase->unzipSize;
-	m_numRecords = mmapBase->records;
-	m_ptrList.risk_set_data((byte*)(mmapBase + 1) , mmapBase->ptrListBytes);
+    TERARK_VERIFY_AL(mmapBase->ptrListBytes, 16);
+    m_unzipSize = mmapBase->unzipSize;
+    m_numRecords = mmapBase->records;
+    m_ptrList.risk_set_data((byte*)(mmapBase + 1) , mmapBase->ptrListBytes);
 
     // auto grow expected capacity is 1.5x of real size
     if (m_ptrList.size() != 0) {
-        m_reserveOutputMultiplier = ceiled_div(m_unzipSize, m_ptrList.size()) * 3 / 2;
+        m_reserveOutputMultiplier = std::min<size_t>
+            (ceiled_div(m_unzipSize, m_ptrList.size()) * 3 / 2, 255);
     }
-	if (mmapBase->zipOffsets_log2_blockUnits) {
-		new(&m_zOffsets)SortedUintVec();
-		m_zOffsets.risk_set_data((byte*)(mmapBase + 1) + mmapBase->ptrListBytes
-							, mmapBase->offsetArrayBytes);
-		TERARK_VERIFY_EQ(m_zOffsets.mem_size(), size_t(mmapBase->offsetArrayBytes));
-		TERARK_VERIFY_EQ(m_zOffsets.size(), size_t(mmapBase->records + 1));
-	}
-	else {
-		new(&m_offsets)UintVecMin0();
-		m_offsets.risk_set_data((byte*)(mmapBase + 1) + mmapBase->ptrListBytes
-						   , mmapBase->records + 1
-						   , mmapBase->offsetsUintBits);
-	// allowing read old data format??
-	// old format will fail
-		TERARK_VERIFY_EQ(m_offsets.mem_size(), size_t(mmapBase->offsetArrayBytes));
-	}
+    if (mmapBase->zipOffsets_log2_blockUnits) {
+        new(&m_zOffsets)SortedUintVec();
+        m_zOffsets.risk_set_data((byte*)(mmapBase + 1) + mmapBase->ptrListBytes
+                            , mmapBase->offsetArrayBytes);
+        TERARK_VERIFY_EQ(m_zOffsets.mem_size(), size_t(mmapBase->offsetArrayBytes));
+        TERARK_VERIFY_EQ(m_zOffsets.size(), size_t(mmapBase->records + 1));
+    }
+    else {
+        new(&m_offsets)UintVecMin0();
+        m_offsets.risk_set_data((byte*)(mmapBase + 1) + mmapBase->ptrListBytes
+                           , mmapBase->records + 1
+                           , mmapBase->offsetsUintBits);
+    // allowing read old data format??
+    // old format will fail
+        TERARK_VERIFY_EQ(m_offsets.mem_size(), size_t(mmapBase->offsetArrayBytes));
+    }
     TERARK_VERIFY(mmapBase->isNewRefEncoding);
-	m_checksumLevel = mmapBase->crc32cLevel;
-	TERARK_VERIFY_AL(m_offsets.mem_size(), 16);
-	TERARK_VERIFY_LE(sizeof(FileHeader) + m_offsets.mem_size() + mmapBase->ptrListBytes, size);
+    m_checksumLevel = mmapBase->crc32cLevel;
+    TERARK_VERIFY_AL(m_offsets.mem_size(), 16);
+    TERARK_VERIFY_LE(sizeof(FileHeader) + m_offsets.mem_size() + mmapBase->ptrListBytes, size);
 
-	if (m_checksumLevel >= 1 && isChecksumVerifyEnabled()) {
-		uint32_t hCRC = Crc32c_update(0, base, sizeof(FileHeader)-4);
-		if (hCRC != mmapBase->headerCRC) {
-			throw BadCrc32cException("DictZipBlobStore::headerCRC",
-				mmapBase->headerCRC, hCRC);
-		}
-		if (m_dict_verified) { // only check offsetsCRC iff dictCRC is verified
+    if (m_checksumLevel >= 1 && isChecksumVerifyEnabled()) {
+        uint32_t hCRC = Crc32c_update(0, base, sizeof(FileHeader)-4);
+        if (hCRC != mmapBase->headerCRC) {
+            throw BadCrc32cException("DictZipBlobStore::headerCRC",
+                mmapBase->headerCRC, hCRC);
+        }
+        if (m_dict_verified) { // only check offsetsCRC iff dictCRC is verified
             uint32_t offsetsCRC =
                 Crc32c_update(0, m_offsets.data(), m_offsets.mem_size());
             if (offsetsCRC != mmapBase->offsetsCRC) {
                 throw BadCrc32cException("DictZipBlobStore::offsetsCRC",
                     mmapBase->offsetsCRC, offsetsCRC);
             }
-		}
-	}
+        }
+    }
 
-	m_entropyAlgo = Options::EntropyAlgo(mmapBase->entropyAlgo);
+    m_entropyAlgo = Options::EntropyAlgo(mmapBase->entropyAlgo);
     m_entropyInterleaved = 1;
-	bool hasEntropyZip = Options::kNoEntropy != m_entropyAlgo;
-	if (hasEntropyZip) {
-		auto mem = m_offsets.data() + m_offsets.mem_size();
-		auto len = mmapBase->entropyTableSize;
+    bool hasEntropyZip = Options::kNoEntropy != m_entropyAlgo;
+    if (hasEntropyZip) {
+        auto mem = m_offsets.data() + m_offsets.mem_size();
+        auto len = mmapBase->entropyTableSize;
         size_t entropyBitmapSize = febitvec::s_mem_size(align_up(m_numRecords, 16 * 8));
-		if (m_checksumLevel >= 1 && isChecksumVerifyEnabled()) {
+        if (m_checksumLevel >= 1 && isChecksumVerifyEnabled()) {
             uint32_t eCRC = Crc32c_update(0, mem, entropyBitmapSize + len);
-			if (mmapBase->entropyTableCRC != eCRC) {
-				throw BadCrc32cException("DictZipBlobStore::entropyTableCRC",
-					mmapBase->entropyTableCRC, eCRC);
-			}
-		}
+            if (mmapBase->entropyTableCRC != eCRC) {
+                throw BadCrc32cException("DictZipBlobStore::entropyTableCRC",
+                    mmapBase->entropyTableCRC, eCRC);
+            }
+        }
         if (m_mmapBase->fileSize <
             mem - (const byte_t*)m_mmapBase + entropyBitmapSize + align_up(len, 16) + sizeof(BlobStoreFileFooter)) {
             THROW_STD(logic_error, "entropyTableSize error");
@@ -2406,42 +2416,43 @@ void DictZipBlobStore::setDataMemory(const void* base, size_t size) {
                 m_huffman_decoder = reinterpret_cast<const Huffman::decoder_o1*>(mem);
             }
         }
-	}
+    }
 
-	if (m_checksumLevel >= 3 && isChecksumVerifyEnabled()) {
-		auto foot = mmapBase->getFileFooter();
-		uint64_t computed = XXHash64(g_dzbsnark_seed)(m_ptrList);
-		uint64_t saved = foot->zipDataXXHash;
-		if (saved != computed) {
-			throw BadChecksumException("DictZipBlobStore::zipDataXXHash",
-				saved, computed);
-		}
-	}
+    if (m_checksumLevel >= 3 && isChecksumVerifyEnabled()) {
+        auto foot = mmapBase->getFileFooter();
+        uint64_t computed = XXHash64(g_dzbsnark_seed)(m_ptrList);
+        uint64_t saved = foot->zipDataXXHash;
+        if (saved != computed) {
+            throw BadChecksumException("DictZipBlobStore::zipDataXXHash",
+                saved, computed);
+        }
+    }
 
     m_gOffsetBits = My_bsr_size_t(m_strDict.size() - gMinLen) + 1;
     set_func_ptr();
 
-#if !defined(NDEBUG)
-	if (offsetsIsSortedUintVec()) {
-		for(size_t i = 0; i < m_numRecords; ++i) {
-			size_t BegEnd[2]; m_zOffsets.get2(i, BegEnd);
+  if (g_debugLevel >= 2) {
+    fprintf(stderr, "DictZipBlobStore::setDataMemory(%s): checking offsets\n", m_fpath.c_str());
+    if (offsetsIsSortedUintVec()) {
+        for(size_t i = 0; i < m_numRecords; ++i) {
+            auto BegEnd = m_zOffsets.get2(i);
             size_t offsetBeg = BegEnd[0];
             size_t offsetEnd = BegEnd[1];
-			assert(offsetBeg <= offsetEnd);
-		}
-		size_t maxOffsets = m_zOffsets[m_numRecords];
-		assert(align_up(maxOffsets, 16) == m_ptrList.size());
-	}
-	else {
-		for(size_t i = 0; i < m_numRecords; ++i) {
+            TERARK_VERIFY_LE(offsetBeg, offsetEnd);
+        }
+        size_t maxOffsets = m_zOffsets[m_numRecords];
+        TERARK_VERIFY_EQ(align_up(maxOffsets, 16), m_ptrList.size());
+    }
+    else {
+        for(size_t i = 0; i < m_numRecords; ++i) {
             size_t offsetBeg = m_offsets[i + 0];
             size_t offsetEnd = m_offsets[i + 1];
-			assert(offsetBeg <= offsetEnd);
-		}
+            TERARK_VERIFY_LE(offsetBeg, offsetEnd);
+        }
         size_t maxOffsets = m_offsets[m_numRecords];
-		assert(align_up(maxOffsets, 16) == m_ptrList.size());
-	}
-#endif
+        TERARK_VERIFY_EQ(align_up(maxOffsets, 16), m_ptrList.size());
+    }
+  }
 }
 
 void DictZipBlobStore::load_mmap(fstring fpath) {
@@ -2601,9 +2612,6 @@ DictZipBlobStore::get_record_append_tpl(size_t recId, valvec<byte_t>* recData)
 const {
     auto readRaw = [this](size_t offset, size_t length) {
         auto base = (const byte_t*)this->m_mmapBase;
-        if (this->m_mmap_aio) {
-            fiber_aio_need(base + offset, length);
-        }
         return base + offset;
     };
     read_record_append_tpl<ZipOffset, CheckSumLevel,
@@ -2618,9 +2626,6 @@ DictZipBlobStore::get_record_append_CacheOffsets_tpl(size_t recId, CacheOffsets*
 const {
     auto readRaw = [this](size_t offset, size_t length) {
         auto base = (const byte_t*)this->m_mmapBase;
-        if (this->m_mmap_aio) {
-            fiber_aio_need(base + offset, length);
-        }
         return base + offset;
     };
     read_record_append_CacheOffsets_tpl<CheckSumLevel,
@@ -2679,8 +2684,7 @@ DictZipBlobStore::fspread_record_append_tpl(pread_func_t fspread,
                                             valvec<byte_t>* rdbuf)
 const {
     auto readRaw = [=](size_t offset, size_t zipLen) {
-        fspread(lambda, baseOffset + offset, zipLen, rdbuf);
-        return rdbuf->data();
+        return fspread(lambda, baseOffset + offset, zipLen, rdbuf);
     };
     read_record_append_tpl<ZipOffset, CheckSumLevel,
         Entropy, EntropyInterLeave>(recID, recData, readRaw);
@@ -2689,10 +2693,10 @@ const {
 static byte_t*
 TERARK_IF_MSVC(,__attribute__((noinline)))
 UpdateOutputPtrAfterGrowCapacity(valvec<byte_t>* buf, size_t len, byte_t*& output) {
-	size_t oldsize = output - buf->data();
-	buf->ensure_capacity(oldsize + len);
-	output = buf->data() + oldsize;
-	return   buf->data() + buf->capacity(); // outEnd
+    size_t oldsize = output - buf->data();
+    buf->ensure_capacity(oldsize + len);
+    output = buf->data() + oldsize;
+    return   buf->data() + buf->capacity(); // outEnd
 }
 
 TERARK_IF_DEBUG(static thread_local size_t tg_dicLen = 0,);
@@ -2740,12 +2744,12 @@ TERARK_IF_DEBUG(static thread_local size_t tg_dicLen = 0,);
 
 static int const DefaultUnzipImp = 1; // DoUnzipSwitchPreserve
 static int init_get_UnzipImp() {
-	int val = (int)getEnvLong("TerarkDictZipUnzipImp", DefaultUnzipImp);
-	if (val < 0 || val > 5) {
-		val = DefaultUnzipImp;
-	}
-//	fprintf(stderr, "TerarkDictZipUnzipImp=%d\n", val);
-	return val;
+    int val = (int)getEnvLong("TerarkDictZipUnzipImp", DefaultUnzipImp);
+    if (val < 0 || val > 5) {
+        val = DefaultUnzipImp;
+    }
+//    fprintf(stderr, "TerarkDictZipUnzipImp=%d\n", val);
+    return val;
 }
 static const int g_DictZipUnzipImp = init_get_UnzipImp();
 
@@ -2859,38 +2863,37 @@ template<bool ZipOffset, int CheckSumLevel,
 inline
 void DictZipBlobStore::read_record_append_tpl(size_t recId, valvec<byte_t>* recData, ReadRaw readRaw)
 const {
-	assert(recId + 1 < m_offsets.size());
-	size_t BegEnd[2];
-	offsetGet2(recId, BegEnd, ZipOffset);
-	assert(BegEnd[0] <= BegEnd[1]);
-	assert(BegEnd[1] <= m_ptrList.size());
-	assert(m_ptrList.data() == (const byte_t*)((FileHeader*)m_mmapBase + 1));
-	size_t offset = sizeof(FileHeader) + BegEnd[0];
-	size_t zipLen = BegEnd[1] - BegEnd[0];
-	if (zipLen == 0) {
-		return;  // empty
-	}
-	const byte* pos = readRaw(offset, zipLen);
-	if (CheckSumLevel == 2) {
-		if (zipLen <= 4) {
-			THROW_STD(logic_error
-				, "CRC check failed: recId = %zd, zlen = %zd"
-				, recId, zipLen);
-		}
+    assert(recId + 1 < m_offsets.size());
+    auto BegEnd = offsetGet2(recId, ZipOffset);
+    assert(BegEnd[0] <= BegEnd[1]);
+    assert(BegEnd[1] <= m_ptrList.size());
+    assert(m_ptrList.data() == (const byte_t*)((FileHeader*)m_mmapBase + 1));
+    size_t offset = sizeof(FileHeader) + BegEnd[0];
+    size_t zipLen = BegEnd[1] - BegEnd[0];
+    if (terark_unlikely(zipLen == 0)) {
+        return;  // empty
+    }
+    const byte* pos = readRaw(offset, zipLen);
+    if (CheckSumLevel == 2) {
+        if (terark_unlikely(zipLen <= 4)) {
+            THROW_STD(logic_error
+                , "CRC check failed: recId = %zd, zlen = %zd"
+                , recId, zipLen);
+        }
         zipLen -= 4; // exclude trailing crc32
-		uint32_t crc2 = Crc32c_update(0, pos, zipLen);
-		uint32_t crc1 = unaligned_load<uint32_t>(pos + zipLen);
-		if (crc2 != crc1) {
-			THROW_STD(logic_error, "CRC check failed: recId = %zd", recId);
-		}
-	}
-	TERARK_IF_DEBUG(tg_dicLen = m_strDict.size(),);
+        uint32_t crc2 = Crc32c_update(0, pos, zipLen);
+        uint32_t crc1 = unaligned_load<uint32_t>(pos + zipLen);
+        if (terark_unlikely(crc2 != crc1)) {
+            THROW_STD(logic_error, "CRC check failed: recId = %zd", recId);
+        }
+    }
+    TERARK_IF_DEBUG(tg_dicLen = m_strDict.size(),);
     if (Options::kNoEntropy != Entropy) {
         read_record_append_entropy<Entropy, EntropyInterLeave>(pos, zipLen,
             recId, recData);
     }
     else {
-    	const byte_t* dic = m_strDict.data();
+        const byte_t* dic = m_strDict.data();
         const byte_t* end = pos + zipLen;
         m_unzip(pos, end, recData, dic, m_gOffsetBits, m_reserveOutputMultiplier);
     }
@@ -2904,7 +2907,7 @@ inline
 void DictZipBlobStore::read_record_append_CacheOffsets_tpl(
                        size_t recId, CacheOffsets* co, ReadRaw readRaw)
 const {
-	assert(recId + 1 < m_offsets.size());
+    assert(recId + 1 < m_offsets.size());
     size_t log2 = m_zOffsets.log2_block_units(); // must be 6 or 7
     size_t mask = (size_t(1) << log2) - 1;
     if (terark_unlikely(recId >> log2 != co->blockId)) {
@@ -2917,35 +2920,35 @@ const {
     size_t inBlockID = recId & mask;
     size_t BegEnd[2] = { co->offsets[inBlockID], co->offsets[inBlockID+1] };
     // code below is based on copy of read_record_append_tpl
-	assert(BegEnd[0] <= BegEnd[1]);
-	assert(BegEnd[1] <= m_ptrList.size());
-	assert(m_ptrList.data() == (const byte_t*)((FileHeader*)m_mmapBase + 1));
-	size_t offset = sizeof(FileHeader) + BegEnd[0];
-	size_t zipLen = BegEnd[1] - BegEnd[0];
-	const byte* pos = readRaw(offset, zipLen);
-	if (CheckSumLevel == 2) {
+    assert(BegEnd[0] <= BegEnd[1]);
+    assert(BegEnd[1] <= m_ptrList.size());
+    assert(m_ptrList.data() == (const byte_t*)((FileHeader*)m_mmapBase + 1));
+    size_t offset = sizeof(FileHeader) + BegEnd[0];
+    size_t zipLen = BegEnd[1] - BegEnd[0];
+    const byte* pos = readRaw(offset, zipLen);
+    if (CheckSumLevel == 2) {
         if (BegEnd[0] == BegEnd[1]) {
             return; // empty
         }
-		if (zipLen <= 4) {
-			THROW_STD(logic_error
-				, "CRC check failed: recId = %zd, zlen = %zd"
-				, recId, zipLen);
-		}
+        if (zipLen <= 4) {
+            THROW_STD(logic_error
+                , "CRC check failed: recId = %zd, zlen = %zd"
+                , recId, zipLen);
+        }
         zipLen -= 4; // exclude trailing crc32
-		uint32_t crc2 = Crc32c_update(0, pos, zipLen);
-		uint32_t crc1 = unaligned_load<uint32_t>(pos + zipLen);
-		if (crc2 != crc1) {
-			THROW_STD(logic_error, "CRC check failed: recId = %zd", recId);
-		}
-	}
-	TERARK_IF_DEBUG(tg_dicLen = m_strDict.size(),);
+        uint32_t crc2 = Crc32c_update(0, pos, zipLen);
+        uint32_t crc1 = unaligned_load<uint32_t>(pos + zipLen);
+        if (crc2 != crc1) {
+            THROW_STD(logic_error, "CRC check failed: recId = %zd", recId);
+        }
+    }
+    TERARK_IF_DEBUG(tg_dicLen = m_strDict.size(),);
     if (Options::kNoEntropy != Entropy) {
         read_record_append_entropy<Entropy, EntropyInterLeave>(pos, zipLen,
             recId, &co->recData);
     }
     else {
-    	const byte_t* dic = m_strDict.data();
+        const byte_t* dic = m_strDict.data();
         const byte_t* end = pos + zipLen;
         m_unzip(pos, end, &co->recData, dic, m_gOffsetBits, m_reserveOutputMultiplier);
     }
@@ -3055,16 +3058,16 @@ ZipOffset                                                         \
 ///@param newToOld length must be this->num_records()
 void
 DictZipBlobStore::reorder_and_load(ZReorderMap& newToOld,
-								   fstring newFile,
-								   bool keepOldFile) {
+                                   fstring newFile,
+                                   bool keepOldFile) {
     auto mmapBase = (const FileHeader*)m_mmapBase;
-	FileStream fp(newFile.c_str(), "wb");
-	fp.chsize(mmapBase->computeFileSize());
-	reorder_zip_data(newToOld, [&fp](const void* data, size_t size) {
-		fp.ensureWrite(data, size);
-	}, newFile + ".reorder-tmp");
-	assert(fp.tell() == mmapBase->computeFileSize());
-	fp.close();
+    FileStream fp(newFile.c_str(), "wb");
+    fp.chsize(mmapBase->computeFileSize());
+    reorder_zip_data(newToOld, [&fp](const void* data, size_t size) {
+        fp.ensureWrite(data, size);
+    }, newFile + ".reorder-tmp");
+    assert(fp.tell() == mmapBase->computeFileSize());
+    fp.close();
     if (mmapBase->embeddedDict == (uint8_t)EmbeddedDictType::kExternal) {
         std::string newDictFname = newFile + "-dict";
         std::string oldDictFname = m_fpath + "-dict";
@@ -3089,14 +3092,13 @@ void DictZipBlobStore::reorder_zip_data(ZReorderMap& newToOld,
         function<void(const void* data, size_t size)> writeAppend,
         fstring tmpFile)
 const {
-
-	assert(nullptr != m_mmapBase);
-	TERARK_IF_DEBUG(febitvec rbits(m_numRecords),;);
-	const bool isOffsetsZipped = offsetsIsSortedUintVec();
+    TERARK_VERIFY(nullptr != m_mmapBase);
+    TERARK_IF_DEBUG(febitvec rbits(m_numRecords),;);
+    const bool isOffsetsZipped = offsetsIsSortedUintVec();
     const bool hasEntropy = m_entropyAlgo != Options::kNoEntropy;
-	size_t recNum = m_numRecords;
-	size_t offset = 0;
-	size_t maxOffsetEnt = isOffsetsZipped ? m_zOffsets[recNum] : m_offsets[recNum];
+    const size_t recNum = m_numRecords;
+    const size_t maxOffsetEnt = isOffsetsZipped ? m_zOffsets[recNum] : m_offsets[recNum];
+    size_t offset = 0;
     MmapWholeFile mmapOffset;
     UintVecMin0 newOffsets;
     SortedUintVec newZipOffsets;
@@ -3107,12 +3109,12 @@ const {
     if (isOffsetsZipped) {
         auto zipOffsetBuilder = std::unique_ptr<SortedUintVec::Builder>(
             SortedUintVec::createBuilder(m_zOffsets.block_units(), tmpFile.c_str()));
-        for(assert(newToOld.size() == recNum); !newToOld.eof(); ++newToOld) {
+        TERARK_VERIFY_EQ(newToOld.size(), recNum);
+        for (; !newToOld.eof(); ++newToOld) {
             size_t newId = newToOld.index();
             size_t oldId = *newToOld;
             assert(oldId < recNum);
-            size_t BegEnd[2];
-            offsetGet2(oldId, BegEnd, isOffsetsZipped);
+            auto BegEnd = offsetGet2(oldId, isOffsetsZipped);
             zipOffsetBuilder->push_back(offset);
             assert(BegEnd[0] <= BegEnd[1]);
             offset += BegEnd[1] - BegEnd[0];
@@ -3120,7 +3122,7 @@ const {
                 newEntropyBitmap.set(newId, m_entropyBitmap[oldId]);
             }
         }
-        assert(offset == maxOffsetEnt);
+        TERARK_VERIFY_EQ(offset, maxOffsetEnt);
         zipOffsetBuilder->push_back(maxOffsetEnt);
         zipOffsetBuilder->finish(nullptr);
         zipOffsetBuilder.reset();
@@ -3134,29 +3136,29 @@ const {
         static const size_t offset_flush_size = 128;
         UintVecMin0 tmpOffsets(offset_flush_size, maxOffsetEnt);
         size_t flush_count = 0;
-        assert(align_up(maxOffsetEnt, 16) == m_ptrList.size());
-        assert(tmpOffsets.uintbits() == m_offsets.uintbits());
-        for (assert(newToOld.size() == recNum); !newToOld.eof(); ++newToOld) {
+        TERARK_VERIFY_EQ(align_up(maxOffsetEnt, 16), m_ptrList.size());
+        TERARK_VERIFY_EQ(tmpOffsets.uintbits(), m_offsets.uintbits());
+        TERARK_VERIFY_EQ(newToOld.size(), recNum);
+        for (; !newToOld.eof(); ++newToOld) {
             size_t newId = newToOld.index() - flush_count;
             size_t oldId = *newToOld;
-            assert(oldId < recNum);
+            TERARK_ASSERT_LT(oldId, recNum);
             if (newId == offset_flush_size) {
                 size_t byte_count = tmpOffsets.uintbits() * offset_flush_size / 8;
                 m_writer_offset.ensureWrite(tmpOffsets.data(), byte_count);
                 flush_count += offset_flush_size;
                 newId = 0;
             }
-            size_t BegEnd[2];
-            offsetGet2(oldId, BegEnd, isOffsetsZipped);
+            auto BegEnd = offsetGet2(oldId, isOffsetsZipped);
             tmpOffsets.set_wire(newId, offset);
             size_t zippedLen = BegEnd[1] - BegEnd[0];
-            assert(BegEnd[0] <= BegEnd[1]);
+            TERARK_ASSERT_LE(BegEnd[0], BegEnd[1]);
             offset += zippedLen;
             if (hasEntropy) {
                 newEntropyBitmap.set(newToOld.index(), m_entropyBitmap[oldId]);
             }
         }
-        assert(offset == maxOffsetEnt);
+        TERARK_VERIFY_EQ(offset, maxOffsetEnt);
         tmpOffsets.resize(recNum - flush_count + 1);
         tmpOffsets.set_wire(recNum - flush_count, maxOffsetEnt);
         tmpOffsets.shrink_to_fit();
@@ -3197,66 +3199,77 @@ const {
         writeAppend(&h, sizeof(h));
     }
     XXHash64 xxhash64(g_dzbsnark_seed);
+    const byte_t* gatherPtr = nullptr;
+    size_t gatherLen = 0;
     for (newToOld.rewind(); !newToOld.eof(); ++newToOld) {
         size_t oldId = *newToOld;
-		size_t BegEnd[2];
-		offsetGet2(oldId, BegEnd, isOffsetsZipped);
-		size_t zippedLen = BegEnd[1] - BegEnd[0];
-		assert(BegEnd[0] <= BegEnd[1]);
-		const byte* beg = m_ptrList.data() + BegEnd[0];
-		xxhash64.update(beg, zippedLen);
-		writeAppend(beg, zippedLen);
-		assert(rbits.is0(oldId));
-		TERARK_IF_DEBUG(rbits.set1(oldId), ;);
-	}
+        auto BegEnd = offsetGet2(oldId, isOffsetsZipped);
+        size_t zippedLen = BegEnd[1] - BegEnd[0];
+        TERARK_ASSERT_LE(BegEnd[0], BegEnd[1]);
+        const byte* beg = m_ptrList.data() + BegEnd[0];
+        xxhash64.update(beg, zippedLen);
+        if (gatherPtr + gatherLen == beg) {
+            gatherLen += zippedLen;
+        } else {
+            if (gatherLen)
+                writeAppend(gatherPtr, gatherLen);
+            gatherPtr = beg;
+            gatherLen = zippedLen;
+        }
+        TERARK_ASSERT_F(rbits.is0(oldId), "oldId = %zd", oldId);
+        TERARK_IF_DEBUG(rbits.set1(oldId), ;);
+    }
+    if (gatherLen) {
+        writeAppend(gatherPtr, gatherLen);
+    }
     static const byte zeros[16] = { 0 };
-	if (offset % 16 != 0) {
-		xxhash64.update(zeros, 16 - offset % 16);
-		writeAppend(zeros, 16 - offset % 16);
-	}
+    if (offset % 16 != 0) {
+        xxhash64.update(zeros, 16 - offset % 16);
+        writeAppend(zeros, 16 - offset % 16);
+    }
     if (isOffsetsZipped) {
         writeAppend(newZipOffsets.data(), newZipOffsets.mem_size());
-        assert(newZipOffsets.mem_size() % 16 == 0);
+        TERARK_VERIFY_AL(newZipOffsets.mem_size(), 16);
         newZipOffsets.risk_release_ownership();
     }
     else {
         writeAppend(newOffsets.data(), newOffsets.mem_size());
-        assert(newOffsets.mem_size() % 16 == 0);
+        TERARK_VERIFY_AL(newOffsets.mem_size(), 16);
         newOffsets.risk_release_ownership();
     }
     MmapWholeFile().swap(mmapOffset);
     ::remove(tmpFile.c_str());
 
-	if (hasEntropy) {
+    if (hasEntropy) {
         auto entropyMem = m_offsets.data() + m_offsets.mem_size() + newEntropyBitmap.mem_size();
         auto entropyLen = ((const FileHeader*)m_mmapBase)->entropyTableSize;
-		assert(entropyLen > 0);
+        TERARK_VERIFY(entropyLen > 0);
         writeAppend(newEntropyBitmap.data(), newEntropyBitmap.mem_size());
         writeAppend(entropyMem, align_up(entropyLen, 16));
-	}
+    }
     if (mmapBase->embeddedDict != (uint8_t)EmbeddedDictType::kExternal) {
         fstring embeddedDict = mmapBase->getEmbeddedDict();
         writeAppend(embeddedDict.data(), embeddedDict.size());
         if (embeddedDict.size() % 16 != 0)
             writeAppend(zeros, 16 - embeddedDict.size() % 16);
     }
-	BlobStoreFileFooter foot;
-	foot.zipDataXXHash = xxhash64.digest();
-	writeAppend(&foot, sizeof(foot));
+    BlobStoreFileFooter foot;
+    foot.zipDataXXHash = xxhash64.digest();
+    writeAppend(&foot, sizeof(foot));
 }
 
 void DictZipBlobStore::purge_and_load(const bm_uint_t* isDel,
-									  size_t baseId_of_isDel,
-									  fstring newFile,
-									  bool keepOldFile) {
+                                      size_t baseId_of_isDel,
+                                      fstring newFile,
+                                      bool keepOldFile) {
     auto mmapBase = (const FileHeader*)m_mmapBase;
-	FileStream fp(newFile.c_str(), "wb");
-	fp.chsize(mmapBase->computeFileSize());
-	purge_zip_data(isDel, baseId_of_isDel, [&fp](const void* data, size_t size) {
-		fp.ensureWrite(data, size);
-	});
-	fp.chsize(fp.tell());
-	fp.close();
+    FileStream fp(newFile.c_str(), "wb");
+    fp.chsize(mmapBase->computeFileSize());
+    purge_zip_data(isDel, baseId_of_isDel, [&fp](const void* data, size_t size) {
+        fp.ensureWrite(data, size);
+    });
+    fp.chsize(fp.tell());
+    fp.close();
     if (mmapBase->embeddedDict == (uint8_t)EmbeddedDictType::kExternal) {
         std::string newDictFname = newFile + "-dict";
         std::string oldDictFname = m_fpath + "-dict";
@@ -3277,67 +3290,66 @@ void DictZipBlobStore::purge_and_load(const bm_uint_t* isDel,
             ::remove(m_fpath.c_str());
         }
     }
-	this->load_mmap(newFile);
+    this->load_mmap(newFile);
 }
 
 // purge deleted records, keep the dictionary unchanged
 void DictZipBlobStore::purge_zip_data(const bm_uint_t* isDel,
-		size_t baseId_of_isDel,
-		function<void(const void* data, size_t size)> writeAppend)
+        size_t baseId_of_isDel,
+        function<void(const void* data, size_t size)> writeAppend)
 const {
-	purge_zip_data_impl(
-		[=](size_t id){ return terark_bit_test(isDel, baseId_of_isDel + id); },
-		writeAppend);
+    purge_zip_data_impl(
+        [=](size_t id){ return terark_bit_test(isDel, baseId_of_isDel + id); },
+        writeAppend);
 }
 
 
 void DictZipBlobStore::purge_zip_data(function<bool(size_t id)> isDel,
-		function<void(const void* data, size_t size)> writeAppend)
+        function<void(const void* data, size_t size)> writeAppend)
 const {
-	purge_zip_data_impl(isDel, writeAppend);
+    purge_zip_data_impl(isDel, writeAppend);
 }
 
 template<class IsDel>
 void DictZipBlobStore::purge_zip_data_impl(IsDel isDel,
-		function<void(const void* data, size_t size)> writeAppend)
+        function<void(const void* data, size_t size)> writeAppend)
 const {
-	assert(nullptr != m_mmapBase);
-	size_t recNum = m_numRecords;
-	size_t offset = 0;
-	const bool isOffsetsZipped = offsetsIsSortedUintVec();
+    assert(nullptr != m_mmapBase);
+    size_t recNum = m_numRecords;
+    size_t offset = 0;
+    const bool isOffsetsZipped = offsetsIsSortedUintVec();
     const bool hasEntropy = Options::kNoEntropy != m_entropyAlgo;
-	size_t maxOffsetEnt = isOffsetsZipped ? m_zOffsets[recNum] : m_offsets[recNum];
+    size_t maxOffsetEnt = isOffsetsZipped ? m_zOffsets[recNum] : m_offsets[recNum];
 
 #if !defined(NDEBUG)
-	size_t maxOffset = maxOffsetEnt;
-	assert(align_up(maxOffset, 16) == m_ptrList.size());
+    size_t maxOffset = maxOffsetEnt;
+    assert(align_up(maxOffset, 16) == m_ptrList.size());
 #endif
-	UintVecMin0 newOffsets(recNum + 1, maxOffsetEnt);
+    UintVecMin0 newOffsets(recNum + 1, maxOffsetEnt);
     febitvec newEntropyBitmap;
     if (hasEntropy) {
         newEntropyBitmap.reserve(recNum);
     }
-	assert(newOffsets.uintbits() <= m_offsets.uintbits());
-	assert(newOffsets.mem_size() <= m_offsets.mem_size());
-	size_t newId = 0;
-	for(size_t oldId = 0; oldId < recNum; oldId++) {
-		if (!isDel(oldId)) {
-			size_t BegEnd[2];
-			offsetGet2(oldId, BegEnd, isOffsetsZipped);
-			newOffsets.set_wire(newId, offset);
-			size_t zippedLen = BegEnd[1] - BegEnd[0];
-			assert(BegEnd[0] <= BegEnd[1]);
-			offset += zippedLen;
+    assert(newOffsets.uintbits() <= m_offsets.uintbits());
+    assert(newOffsets.mem_size() <= m_offsets.mem_size());
+    size_t newId = 0;
+    for(size_t oldId = 0; oldId < recNum; oldId++) {
+        if (!isDel(oldId)) {
+            auto BegEnd = offsetGet2(oldId, isOffsetsZipped);
+            newOffsets.set_wire(newId, offset);
+            size_t zippedLen = BegEnd[1] - BegEnd[0];
+            assert(BegEnd[0] <= BegEnd[1]);
+            offset += zippedLen;
             if (hasEntropy) {
                 newEntropyBitmap.push_back(m_entropyBitmap[oldId]);
             }
-			newId++;
-		}
-	}
-	assert(offset <= maxOffset);
-	size_t newNum = newId;
-	newOffsets.resize(newNum+1);
-	newOffsets.set_wire(newNum, offset);
+            newId++;
+        }
+    }
+    assert(offset <= maxOffset);
+    size_t newNum = newId;
+    newOffsets.resize(newNum+1);
+    newOffsets.set_wire(newNum, offset);
     auto mmapBase = (const FileHeader*)m_mmapBase;
 
     if (hasEntropy) {
@@ -3366,48 +3378,47 @@ const {
         }
         writeAppend(&h, sizeof(h));
     }
-	XXHash64 xxhash64(g_dzbsnark_seed);
-	newId = 0;
-	offset = 0;
-	for(size_t oldId = 0; oldId < recNum; oldId++) {
-		if (!isDel(oldId)) {
-			size_t BegEnd[2];
-			offsetGet2(oldId, BegEnd, isOffsetsZipped);
-			newOffsets.set_wire(newId, offset);
-			size_t zippedLen = BegEnd[1] - BegEnd[0];
-			assert(BegEnd[0] <= BegEnd[1]);
-			const  byte* beg = m_ptrList.data() + BegEnd[0];
-			xxhash64.update(beg, zippedLen);
-			writeAppend(beg, zippedLen);
-			offset += zippedLen;
-			newId++;
-		}
-	}
-	assert(newId == newNum);
-	if (newId != newNum) {
-		THROW_STD(logic_error, "isDel was changed during purge");
-	}
-	static const byte zeros[16] = {0};
-	if (offset % 16 != 0) {
-		xxhash64.update(zeros, 16 - offset % 16);
-		writeAppend(zeros, 16 - offset % 16);
-	}
-	writeAppend(newOffsets.data(), newOffsets.mem_size());
+    XXHash64 xxhash64(g_dzbsnark_seed);
+    newId = 0;
+    offset = 0;
+    for(size_t oldId = 0; oldId < recNum; oldId++) {
+        if (!isDel(oldId)) {
+            auto BegEnd = offsetGet2(oldId, isOffsetsZipped);
+            newOffsets.set_wire(newId, offset);
+            size_t zippedLen = BegEnd[1] - BegEnd[0];
+            assert(BegEnd[0] <= BegEnd[1]);
+            const  byte* beg = m_ptrList.data() + BegEnd[0];
+            xxhash64.update(beg, zippedLen);
+            writeAppend(beg, zippedLen);
+            offset += zippedLen;
+            newId++;
+        }
+    }
+    assert(newId == newNum);
+    if (newId != newNum) {
+        THROW_STD(logic_error, "isDel was changed during purge");
+    }
+    static const byte zeros[16] = {0};
+    if (offset % 16 != 0) {
+        xxhash64.update(zeros, 16 - offset % 16);
+        writeAppend(zeros, 16 - offset % 16);
+    }
+    writeAppend(newOffsets.data(), newOffsets.mem_size());
     if (hasEntropy) {
         auto entropyMem = m_offsets.data() + m_offsets.mem_size()
                         + febitvec::s_mem_size(align_up(recNum, 16 * 8));
         auto entropyLen = mmapBase->entropyTableSize;
         writeAppend(newEntropyBitmap.data(), newEntropyBitmap.mem_size());
-		writeAppend(entropyMem, align_up(entropyLen, 16));
-	}
+        writeAppend(entropyMem, align_up(entropyLen, 16));
+    }
     if (mmapBase->embeddedDict != (uint8_t)EmbeddedDictType::kExternal) {
         fstring embeddedDict = mmapBase->getEmbeddedDict();
         writeAppend(embeddedDict.data(), embeddedDict.size());
         writeAppend(zeros, 16 - embeddedDict.size() % 16);
     }
-	BlobStoreFileFooter foot;
-	foot.zipDataXXHash = xxhash64.digest();
-	writeAppend(&foot, sizeof(foot));
+    BlobStoreFileFooter foot;
+    foot.zipDataXXHash = xxhash64.digest();
+    writeAppend(&foot, sizeof(foot));
 }
 
 } // namespace terark

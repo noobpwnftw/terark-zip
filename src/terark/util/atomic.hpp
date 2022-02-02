@@ -19,18 +19,8 @@ namespace terark {
         return reinterpret_cast<volatile std::atomic<T>&>(x);
     }
 
-// cax_* are more powerful
-// cas_* are less powerful
-
 #if  defined(__GNUC__) && \
-    !defined(__clang__) && \
-  ( \
-	defined(__i386__) || defined(__i386) || defined(_M_IX86) || \
-	defined(__X86__) || defined(_X86_) || \
-	defined(__THW_INTEL__) || defined(__I86__) || \
-	defined(__amd64__) || defined(__amd64) || \
-    defined(__x86_64__) || defined(__x86_64) || defined(_M_X64) \
-  )
+    !defined(__clang__)
 // only for gnu gcc
 // because gnu gcc atomic<> will not generate cmpxchg16b for x86
 // see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80878
@@ -96,36 +86,6 @@ namespace terark {
             std::memory_order_release, std::memory_order_relaxed);
     }
 #endif
-
-    template<class T>
-    inline
-    bool cax_weak(T& x, T& expected, T desired) {
-        return reinterpret_cast<std::atomic<T>&>(x)
-        .compare_exchange_weak(expected, desired,
-            std::memory_order_release, std::memory_order_relaxed);
-    }
-    template<class T>
-    inline
-    bool cax_weak(volatile T& x, T& expected, T desired) {
-        return reinterpret_cast<volatile std::atomic<T>&>(x)
-        .compare_exchange_weak(expected, desired,
-            std::memory_order_release, std::memory_order_relaxed);
-    }
-
-    template<class T>
-    inline
-    bool cax_strong(T& x, T& expected, T desired) {
-        return reinterpret_cast<std::atomic<T>&>(x)
-        .compare_exchange_strong(expected, desired,
-            std::memory_order_release, std::memory_order_relaxed);
-    }
-    template<class T>
-    inline
-    bool cax_strong(volatile T& x, T& expected, T desired) {
-        return reinterpret_cast<volatile std::atomic<T>&>(x)
-        .compare_exchange_strong(expected, desired,
-            std::memory_order_release, std::memory_order_relaxed);
-    }
 
     template<class T>
     inline

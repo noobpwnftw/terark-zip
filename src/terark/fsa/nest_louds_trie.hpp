@@ -11,6 +11,18 @@
 #include "dfa_algo_basic.hpp"
 #include "fsa_cache.hpp"
 
+//#define USE_SUFFIX_ARRAY_TRIE
+
+#if defined(USE_SUFFIX_ARRAY_TRIE)
+#include "suffix_array_trie.hpp"
+#include <divsufsort.h>
+#else
+namespace terark {
+#define SuffixTrieCacheDFA DummySuffixTrieCacheDFA
+	class DummySuffixTrieCacheDFA {};
+}
+#endif
+
 namespace terark {
 
 class TERARK_DLL_EXPORT NestLoudsTrieConfig {

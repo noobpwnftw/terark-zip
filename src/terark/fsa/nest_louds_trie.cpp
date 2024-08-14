@@ -1,15 +1,3 @@
-//#define USE_SUFFIX_ARRAY_TRIE
-
-#if defined(USE_SUFFIX_ARRAY_TRIE)
-#include "suffix_array_trie.hpp"
-#include <divsufsort.h>
-#else
-namespace terark {
-#define SuffixTrieCacheDFA DummySuffixTrieCacheDFA
-	class DummySuffixTrieCacheDFA {};
-}
-#endif
-
 #include "nest_louds_trie_inline.hpp"
 #include "dfa_mmap_header.hpp"
 #include "tmplinst.hpp"

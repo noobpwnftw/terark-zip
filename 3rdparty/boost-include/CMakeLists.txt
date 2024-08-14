@@ -8,7 +8,7 @@ else()
         SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
         CONFIGURE_COMMAND ./bootstrap.sh --with-libraries=system,fiber,thread
         BUILD_IN_SOURCE 1
-        BUILD_COMMAND ./b2 --build-dir=${CMAKE_CURRENT_BINARY_DIR} --stagedir=${CMAKE_CURRENT_BINARY_DIR} cxxflags=-fPIC -std=gnu++14 cflags=-fPIC threading=multi link=static variant=release visibility=global
+        BUILD_COMMAND ./b2 --build-dir=${CMAKE_CURRENT_BINARY_DIR} --stagedir=${CMAKE_CURRENT_BINARY_DIR} cxxflags=-std=gnu++14 threading=multi link=static variant=release visibility=global
         INSTALL_COMMAND ""
     )
     ADD_LIBRARY(boost-system STATIC IMPORTED GLOBAL)

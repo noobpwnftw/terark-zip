@@ -3274,10 +3274,6 @@ SuffixBase *BuildDictZipSuffix(InputBufferType &input, size_t numKeys,
   return new IndexBlobStoreSuffix<DictZipBlobStore>(static_cast<DictZipBlobStore*>(store), memory, isReverse);
 }
 
-bool UseRawSuffix(size_t numKeys, size_t sumKeyLen, double zipRatio) {
-  return !UseEntropySuffix(numKeys, sumKeyLen, zipRatio) && !UseEntropySuffix(numKeys, sumKeyLen, zipRatio);
-}
-
 template <class InputBufferType>
 SuffixBase *BuildSuffixAutoSelect(InputBufferType &input, size_t numKeys,
                                   size_t sumKeyLen, bool isFixedLen,

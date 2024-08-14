@@ -16,6 +16,7 @@
 #include <boost/predef/other/endian.h>
 #include <boost/current_function.hpp>
 #include <limits.h>
+#include <limits>
 
 #if defined(_MSC_VER)
 	#if _MSC_VER >= 1800

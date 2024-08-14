@@ -1,7 +1,8 @@
-#ifndef __terark_fsa_fast_search_byte_hpp__
-#define __terark_fsa_fast_search_byte_hpp__
+#pragma once
 
+#ifdef _M_X64
 #include <immintrin.h>
+#endif
 #include <terark/succinct/rank_select_basic.hpp>
 
 namespace terark {
@@ -210,6 +211,3 @@ binary_search_byte(const byte_t* data, size_t len, byte_t key) {
 
 
 } // namespace terark
-
-#endif // __terark_fsa_fast_search_byte_hpp__
-

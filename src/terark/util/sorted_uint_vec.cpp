@@ -1,3 +1,6 @@
+#if defined(__GNUC__) && __GNUC_MINOR__ + 1000 * __GNUC__ > 7000
+  #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
 #include "sorted_uint_vec.hpp"
 #include <terark/bitmap.hpp>
 #include <terark/num_to_str.hpp>
@@ -215,16 +218,19 @@ Bits_04_14 = 0b0000000000000000000000111111111111110000000000000011111111111111,
 Zc03_07_09 = 0b0000000111000000111000000111000000111000000111000000111000000111,
 Zc01_07_09 = 0b0000000001000000001000000001000000001000000001000000001000000001,
 Bits_06_09 = 0b0000000000000000000111111111000000000111111111000000000111111111,
+/*
 Bits_03_18 = 0b0000000000000000000000000001000000000000000001000000000000000001,
-
+*/
 Bits_06_10 = 0b0000000000000011111111110000000000111111111100000000001111111111;
 
+/*
 static inline size_t s_get_mask(size_t bits) {
 	if (sizeof(size_t)*8 == bits)
 		return size_t(-1);
 	else
 		return ~(size_t(-1) << bits);
 }
+*/
 
 #define WordUnits      (64/Width)
 #define UnitMask       ( (size_t(+1) <<    Width) - 1 )
@@ -242,10 +248,11 @@ struct SortedUintVec::ObjectHeader {
 	uint64_t  reserved : 14;
 };
 
-void SortedUintVec::get2(size_t idx, size_t aVal[2]) const {
+std::array<size_t, 2> SortedUintVec::get2(size_t idx) const {
     static_assert(sizeof(ObjectHeader)==16, "sizeof(ObjectHeader) must be 16");
     assert(m_is_sorted_uint_vec);
     assert(idx < m_size);
+    std::array<size_t, 2> aVal;
     size_t blockIdx = idx >> m_log2_blockUnits;
     size_t blockUnits = size_t(1) << m_log2_blockUnits;
     size_t indexWidth = m_offsetWidth + m_sampleWidth;
@@ -403,6 +410,8 @@ void SortedUintVec::get2(size_t idx, size_t aVal[2]) const {
             aVal[1] = sample1;
         break; }
     } // switch
+
+    return aVal;
 }
 
 /// aVal capacity must be at least blockUnits(64 or 128)
@@ -1434,7 +1443,7 @@ SortedUintVec::Builder::Impl::finish(SortedUintVec* vec) {
             memmove(base + m_indexOffset, base + sizeof(ObjectHeader), indexSize);
             auto readSize = fpInput->read(base + sizeof(ObjectHeader), dataSize);
             TERARK_UNUSED_VAR(readSize);
-            assert(readSize == dataSize); 
+            assert(readSize == dataSize);
             assert(dataSize % 8 == 0);
         }
         fpSeekable->seek(endPos);

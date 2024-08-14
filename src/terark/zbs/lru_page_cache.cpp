@@ -121,7 +121,7 @@ template<class T>
 class CircularPermanentID {
 	AutoFree<T> m_objects;
 	AutoFree<bm_uint_t> m_dropped;
-//	size_t    m_head; // == m_min_id % (m_cap-1)
+//	size_t    m_head; // == m_min_id % m_cap
 	size_t    m_cap;
 	size_t    m_tail;
 	size_t    m_min_id;
@@ -136,7 +136,7 @@ public:
 			size_t bpos = terark_bsr_u32((uint32_t)m_cap);
 			m_cap = size_t(1) << (bpos + 1);
 		}
-		m_dropped.resize(0, m_cap, 0);
+		m_dropped.resize(0, m_cap/TERARK_WORD_BITS, 0);
 		m_objects.resize(0, m_cap, T());
 	}
 	size_t push(const T& x) {
@@ -154,7 +154,7 @@ public:
 				virt_tail = (tail - head) & mask;
 				goto DoPush;
 			}
-			m_dropped.resize(2*cap);
+			m_dropped.resize(2*cap/TERARK_WORD_BITS);
 			m_objects.resize(2*cap);
 			bm_uint_t* dropped = m_dropped;
 			T        * objects = m_objects;

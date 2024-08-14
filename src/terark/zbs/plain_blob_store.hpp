@@ -5,8 +5,6 @@
  *      Author: leipeng
  */
 
-#ifndef ZBS_PLAIN_BLOB_STORE_HPP_
-#define ZBS_PLAIN_BLOB_STORE_HPP_
 #pragma once
 
 #include "abstract_blob_store.hpp"
@@ -55,5 +53,3 @@ public:
 };
 
 } // namespace terark
-
-#endif /* ZBS_PLAIN_BLOB_STORE_HPP_ */

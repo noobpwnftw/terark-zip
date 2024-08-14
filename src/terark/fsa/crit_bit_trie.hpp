@@ -1,3 +1,5 @@
+#pragma once
+
 #include <queue>
 #include <terark/histogram.hpp>
 #include <terark/rank_select.hpp>
@@ -55,14 +57,10 @@ class CritBitTriePackedBuilder {
 
 class CritBitTrieBuilder {
  public:
-   CritBitTrieBuilder(bool is_reverse, uint8_t hash_bit_num)
-       : is_reverse_(is_reverse),
-         hash_bit_num_(hash_bit_num),
-         hash_mask_(hash_bit_num ? (uint64_t(-1) >> (64 - hash_bit_num)) : 0) {
-       if (hash_bit_num_ != 0) {
-           hash_vec_.resize_with_uintbits(0, hash_bit_num_);
-       }
-   }
+  CritBitTrieBuilder(bool is_reverse, uint8_t hash_bit_num)
+      : is_reverse_(is_reverse),
+        hash_bit_num_(hash_bit_num),
+        hash_mask_(hash_bit_num ? (uint64_t(-1) >> (64 - hash_bit_num)) : 0) {}
   ~CritBitTrieBuilder();
   void insert(fstring key);
   void encode();
@@ -114,7 +112,7 @@ class CritBitTriePacked {
   std::vector<CritBitTrie> trie_list_;
 
   void save(std::function<void(const void*, size_t)> append) const;
-  bool load(fstring mem);
+  void load(fstring mem);
   void clear();
   void risk_release();
 

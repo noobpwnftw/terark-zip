@@ -14,7 +14,7 @@
 // Now database record/value is compressed by DictZibBlobStore, but this idea
 // still has a few benefits: to prevent very rare long keys to fullfill the
 // length bits -- (m_next_link[rank1(i)] | m_label[i])
-#define NestLoudsTrie_EnableDelim
+//#define NestLoudsTrie_EnableDelim
 
 namespace terark {
 
@@ -238,12 +238,9 @@ ComputeBestZipLen(const SortableStrVec& strVec, size_t minZipLen, uint16_t* lenA
 	AutoFree<int> sa(strVec.str_size());
 	const byte_t* str = strVec.m_strpool.data();
 	const size_t  saLen = strVec.str_size();
-	profiling pf;
-	long long t0 = pf.now();
 	if (divsufsort(str, sa, saLen, 0) != 0) {
 		throw std::bad_alloc();
 	}
-	long long t1 = pf.now();
 	std::fill_n(lenArr, saLen, (uint16_t)minZipLen);
 	valvec<DfsElem> stack(256, valvec_reserve());
 	stack.emplace_back(0, strVec.str_size(), 0);
@@ -256,7 +253,7 @@ ComputeBestZipLen(const SortableStrVec& strVec, size_t minZipLen, uint16_t* lenA
 		size_t pos = top.pos;
 		if (pos > minZipLen) {
 			for(size_t i = lo; i < hi; ++i)
-				lenArr[sa[lo]] = pos;
+				lenArr[sa[i]] = pos;
 		}
 		while (lo + minFreq <= hi) {
 			while (terark_unlikely(sa[lo] + pos >= saLen)) {
@@ -279,7 +276,6 @@ ComputeBestZipLen(const SortableStrVec& strVec, size_t minZipLen, uint16_t* lenA
 			Done:;
 		}
 	}
-	long long t2 = pf.now();
 	for(size_t i = 0; i < strVec.m_index.size(); ++i) {
 		size_t pos = strVec.m_index[i].offset;
 		size_t end = strVec.m_index[i].endpos();
@@ -288,9 +284,30 @@ ComputeBestZipLen(const SortableStrVec& strVec, size_t minZipLen, uint16_t* lenA
 				lenArr[pos] = end - pos;
 		}
 	}
-//	long long t3 = pf.now();
-	printf("ComputeBestZipLen: divsufsort = %f sec, compute = %f sec\n", pf.sf(t0,t1), pf.sf(t1, t2));
 }
+#endif
+
+#if defined(USE_SUFFIX_ARRAY_TRIE)
+static void init_suffix_array(SortableStrVec& strVec, const NestLoudsTrieConfig& conf) {
+	if (conf.saFragMinFreq && (!conf.suffixTrie || strVec.sync_real_str_size() < strVec.str_size() * 0.7)) {
+		size_t minTokenLen = 8;
+		size_t minCacheDist = 32;
+		size_t bfsMaxDepth = 8;
+		conf.suffixTrie.reset(new SuffixTrieCacheDFA());
+		conf.suffixTrie->build_sa(strVec);
+		conf.suffixTrie->bfs_build_cache(minTokenLen, minCacheDist, bfsMaxDepth);
+		if (conf.debugLevel >= 1)
+			conf.suffixTrie->sa_print_stat();
+	}
+	else if (conf.bzMinLen) {
+		size_t minTokenLen = 8;
+		strVec.make_ascending_offset();
+		conf.bestZipLenArr = (uint16_t*)::realloc(conf.bestZipLenArr, strVec.str_size()*sizeof(uint16_t));
+		ComputeBestZipLen(strVec, minTokenLen, conf.bestZipLenArr);
+	}
+}
+template<class StrVecType>
+static void init_suffix_array(StrVecType&, const NestLoudsTrieConfig&) {}
 #endif
 
 } // anonymous namespace
@@ -404,7 +421,7 @@ risk_release_ownership() noexcept {
 	m_core_max_link_val = 0;
 	m_total_zpath_len = 0;
 	m_layer_id_rank.clear();
-	m_layer_ref.clear();
+	m_layer_ref = nullptr;
 	m_max_layer_id = 0;
 	m_max_layer_size = 0;
 	m_max_strlen = 0;
@@ -438,7 +455,7 @@ swap(NestLoudsTrieTpl& y) noexcept {
 	std::swap(m_total_zpath_len, y.m_total_zpath_len);
 	std::swap(m_next_trie, y.m_next_trie);
 	m_layer_id_rank.swap(y.m_layer_id_rank);
-	m_layer_ref.swap(y.m_layer_ref);
+	std::swap(m_layer_ref, y.m_layer_ref);
 	std::swap(m_max_layer_id, y.m_max_layer_id);
 	std::swap(m_max_layer_size, y.m_max_layer_size);
 	std::swap(m_max_strlen, y.m_max_strlen);
@@ -495,7 +512,11 @@ get_core_str(size_t node_id) const noexcept {
 	assert(NULL != m_core_data);
 	assert(m_core_size > 0);
 	uint64_t linkVal = get_link_val(node_id);
+#if defined(__BMI2__)
+	size_t length = _bzhi_u64(linkVal, m_core_len_bits) + m_core_min_len;
+#else
 	size_t length = size_t(linkVal  & m_core_len_mask) + m_core_min_len;
+#endif
 	size_t offset = size_t(linkVal >> m_core_len_bits);
 	assert(offset < m_core_size);
 	assert(offset + length <= m_core_size);
@@ -604,7 +625,11 @@ tpl_restore_next_string(size_t node_id, StrBuf* str) const noexcept {
 	BOOST_STATIC_ASSERT(sizeof(char_type) == 1);
 	auto coreData = (const char_type*)m_core_data;
 	if (linkVal < m_core_max_link_val) {
+#if defined(__BMI2__)
+		size_t length = _bzhi_u64(linkVal, m_core_len_bits) + m_core_min_len;
+#else
 		size_t length = size_t(linkVal &  m_core_len_mask) + m_core_min_len;
+#endif
 		size_t offset = size_t(linkVal >> m_core_len_bits);
 		assert(offset < m_core_size);
 		assert(offset + length <= m_core_size);
@@ -628,7 +653,11 @@ get_zpath_data(size_t node_id, MatchContext* ctx) const noexcept {
 	uint64_t linkVal = get_link_val(node_id);
 	if (linkVal < m_core_max_link_val) {
 		assert(NULL != m_core_data);
+#if defined(__BMI2__)
+		size_t length = _bzhi_u64(linkVal, m_core_len_bits) + m_core_min_len;
+#else
 		size_t length = size_t(linkVal &  m_core_len_mask) + m_core_min_len;
+#endif
 		size_t offset = size_t(linkVal >> m_core_len_bits);
 		assert(offset < m_core_size);
 		assert(offset + length <= m_core_size);
@@ -661,7 +690,11 @@ getZpathFixed(size_t node_id, byte_t* buf, size_t cap) const noexcept {
 	uint64_t linkVal = get_link_val(node_id);
 	if (linkVal < m_core_max_link_val) {
 		assert(NULL != m_core_data);
+#if defined(__BMI2__)
+		size_t length = _bzhi_u64(linkVal, m_core_len_bits) + m_core_min_len;
+#else
 		size_t length = size_t(linkVal &  m_core_len_mask) + m_core_min_len;
+#endif
 		size_t offset = size_t(linkVal >> m_core_len_bits);
 		assert(offset < m_core_size);
 		assert(offset + length <= m_core_size);
@@ -704,10 +737,20 @@ matchZpath(size_t node_id, const byte_t* str, size_t slen) const noexcept {
 	assert(node_id < m_is_link.size());
 	assert(m_is_link[node_id]);
 	uint64_t linkVal = get_link_val(node_id);
+	return matchZpath_link(linkVal, str, slen);
+}
+template<class RankSelect, class RankSelect2, bool FastLabel>
+intptr_t
+NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
+matchZpath_link(size_t linkVal, const byte_t* str, size_t slen) const noexcept {
 	size_t coreMaxLinkVal = m_core_max_link_val;
 	if (linkVal < coreMaxLinkVal) {
 		assert(NULL != m_core_data);
+#if defined(__BMI2__)
+		size_t length = _bzhi_u64(linkVal, m_core_len_bits) + m_core_min_len;
+#else
 		size_t length = size_t(linkVal &  m_core_len_mask) + m_core_min_len;
+#endif
 		size_t offset = size_t(linkVal >> m_core_len_bits);
 		assert(offset < m_core_size);
 		assert(offset + length <= m_core_size);
@@ -2115,13 +2158,13 @@ build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
 		}
 	}
 	size_t minLinkStrLen = getRealMinLinkStrLen(conf);
+	size_t maxFragLen0 = std::min<size_t>(conf.maxFragLen, MAX_FRAG);
 #if defined(NestLoudsTrie_EnableDelim)
 	double realMaxFragLen = conf.maxFragLen; // ? conf.maxFragLen : double(strVec.str_size())/strVec.size();
 	double q = pow(realMaxFragLen/conf.minFragLen, 1.0/(conf.nestLevel + 1));
 	double fmaxFragLen1 = conf.minFragLen * pow(q, curNestLevel + 1);
 	double fmaxFragLen2 = fmaxFragLen1/q;
 	double fmaxFragLen3 = fmaxFragLen2/q;
-	size_t maxFragLen0 = std::min<size_t>(conf.maxFragLen, MAX_FRAG);
 	size_t maxFragLen1 = ceil(fmaxFragLen1);
 	size_t maxFragLen2 = ceil(fmaxFragLen2);
 	size_t maxFragLen3 = ceil(fmaxFragLen3);
@@ -2180,25 +2223,7 @@ build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
 		q1->complete_write();
 	};
 #if defined(USE_SUFFIX_ARRAY_TRIE)
-	if (boost::is_same<StrVecType, SortableStrVec>::value) {
-		if (conf.saFragMinFreq && (!conf.suffixTrie || strVec.m_real_str_size < strVec.str_size() * 0.7)) {
-			size_t minTokenLen = 8;
-			size_t minCacheDist = 32;
-			size_t bfsMaxDepth = 8;
-			conf.suffixTrie.reset(new SuffixTrieCacheDFA());
-			conf.suffixTrie->build_sa(strVec);
-			conf.suffixTrie->bfs_build_cache(minTokenLen, minCacheDist, bfsMaxDepth);
-			if (conf.debugLevel >= 1)
-				conf.suffixTrie->sa_print_stat();
-		}
-		else if (conf.bzMinLen) {
-			size_t minTokenLen = 8;
-		//	size_t minCacheDist = 32;
-			strVec.make_ascending_offset();
-			conf.bestZipLenArr = (uint16_t*)::realloc(conf.bestZipLenArr, strVec.str_size()*sizeof(uint16_t));
-			ComputeBestZipLen(strVec, minTokenLen, conf.bestZipLenArr);
-		}
-	}
+	init_suffix_array(strVec, conf);
 #endif
 	m_is_link.push_back(false); // reserve unused
 	m_louds.push_back(true);
@@ -2296,8 +2321,43 @@ build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
 				assert(parentBegCol < childBegStr.size());
 				size_t childEndRow = strVec.upper_bound_at_pos(childBegRow, parentEndRow, parentBegCol, childBegStr[parentBegCol]);
 				size_t childBegCol;
+				size_t freq = childEndRow - childBegRow;
 			//	size_t childEndCol = std::min(childBegStr.size(), parentBegCol + MAX_ZPATH_LEN);
 				size_t childEndCol = std::min(childBegStr.size(), parentBegCol + maxFragLen0);
+				auto choose_boundary_cut = [&](size_t cutEndCol) {
+#if defined(NestLoudsTrie_EnableDelim)
+					if (cutEndCol - parentBegCol > maxFragLen3) {
+						auto str = childBegStr.udata();
+						cutEndCol = std::min(cutEndCol, parentBegCol + maxFragLen1);
+						if (conf.flags[NestLoudsTrieConfig::optSearchDelimForward]) {
+							size_t cutBegCol = parentBegCol + maxFragLen3;
+							for (; cutBegCol < cutEndCol; ++cutBegCol) {
+								byte_t c = str[cutBegCol];
+								if (conf.bestDelimBits.is1(c))
+									break;
+								if (cutBegCol >= parentBegCol + maxFragLen2) {
+									if (conf.flags[NestLoudsTrieConfig::optCutFragOnPunct] && ispunct(c))
+										break;
+								}
+							}
+							return cutBegCol;
+						}
+						size_t lastPunctPos = 0;
+						size_t min_pos = parentBegCol + minFragLen1;
+						for (size_t cutBegCol = cutEndCol; cutBegCol > min_pos; --cutBegCol) {
+							byte_t c = str[cutBegCol - 1];
+							if (conf.bestDelimBits.is1(c))
+								return cutBegCol;
+							if (0 == lastPunctPos) {
+								if (conf.flags[NestLoudsTrieConfig::optCutFragOnPunct] && ispunct(c))
+									lastPunctPos = cutBegCol;
+							}
+						}
+						return lastPunctPos ? lastPunctPos : cutEndCol;
+					}
+#endif
+					return cutEndCol;
+				};
 				if (childEndRow - childBegRow > 1) {
 					childBegCol = unmatchPos(childBegStr.udata(),
 											 strVec.nth_data(childEndRow - 1),
@@ -2308,10 +2368,16 @@ build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
 				}
 #if defined(USE_SUFFIX_ARRAY_TRIE)
 				else if (conf.suffixTrie) {
-				//	size_t saMinFragLen = maxFragLen3;
 					size_t saMinFragLen = conf.minFragLen;
-				//	size_t saMinFragLen = 12;
+					size_t boundaryBegCol = choose_boundary_cut(childEndCol);
+					childBegCol = boundaryBegCol;
+					bool saChosen = false;
 					if (childEndCol - parentBegCol > saMinFragLen) {
+#if defined(NestLoudsTrie_EnableDelim)
+						size_t saEndCol = std::min(childEndCol, parentBegCol + maxFragLen1);
+#else
+						size_t saEndCol = childEndCol;
+#endif
 				#if 1
 						auto res = conf.suffixTrie->sa_match_max_score(
 							childBegStr.substr(parentBegCol), saMinFragLen, conf.saFragMinFreq);
@@ -2319,12 +2385,26 @@ build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
 						auto res = conf.suffixTrie->sa_match_max_length(
 							childBegStr.substr(parentBegCol), conf.saFragMinFreq);
 				#endif
-						childBegCol = parentBegCol + res.depth;
-						if (terark_unlikely(conf.debugLevel >= 3))
+						size_t saBegCol = parentBegCol + std::min(res.depth, saEndCol - parentBegCol);
+						size_t saFragLen = saBegCol - parentBegCol;
+#if defined(NestLoudsTrie_EnableDelim)
+						size_t boundaryFragLen = boundaryBegCol - parentBegCol;
+#endif
+						if (saFragLen >= saMinFragLen &&
+							res.freq() >= saFragLen &&
+#if defined(NestLoudsTrie_EnableDelim)
+							saFragLen >= boundaryFragLen) {
+#else
+							true) {
+#endif
+							childBegCol = saBegCol;
+							freq = res.freq();
+							saChosen = true;
+						}
+						if (terark_unlikely(conf.debugLevel >= 3) && saChosen)
 							printDup("found dup2", depth, res.freq(),
 									childBegStr, parentBegCol, childBegCol);
-					} else
-						childBegCol = childEndCol;
+					}
 				}
 #endif
 #if defined(NestLoudsTrie_EnableDelim) && defined(USE_SUFFIX_ARRAY_TRIE)
@@ -2347,40 +2427,8 @@ build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
 					}
 				}
 #endif
-#if defined(NestLoudsTrie_EnableDelim)
-				else if (childEndCol - parentBegCol > maxFragLen3) {
-					auto str = childBegStr.udata();
-					childEndCol = std::min(childEndCol, parentBegCol + maxFragLen1);
-					if (conf.flags[NestLoudsTrieConfig::optSearchDelimForward]) {
-						childBegCol = parentBegCol + maxFragLen3;
-						for (; childBegCol < childEndCol; ++childBegCol) {
-							byte_t c = str[childBegCol];
-							if (conf.bestDelimBits.is1(c))
-								break;
-							if (childBegCol >= parentBegCol + maxFragLen2) {
-								if (conf.flags[NestLoudsTrieConfig::optCutFragOnPunct] && ispunct(c))
-									break;
-							}
-						}
-					} else {
-						size_t lastPunctPos = 0;
-						size_t min_pos = parentBegCol + minFragLen1;
-						for (childBegCol = childEndCol; childBegCol > min_pos; --childBegCol) {
-							byte_t c = str[childBegCol - 1];
-							if (conf.bestDelimBits.is1(c))
-								goto BackwardSearchDone;
-							else if (0 == lastPunctPos) {
-								if (conf.flags[NestLoudsTrieConfig::optCutFragOnPunct] && ispunct(c))
-									lastPunctPos = childBegCol;
-							}
-						}
-						childBegCol = lastPunctPos ? lastPunctPos : childEndCol;
-						BackwardSearchDone:;
-					}
-				}
-#endif
 				else {
-					childBegCol = childEndCol;
+					childBegCol = choose_boundary_cut(childEndCol);
 					assert(childBegCol > parentBegCol);
 				}
 				size_t fragStrLen = childBegCol - parentBegCol;
@@ -2401,7 +2449,6 @@ build_self_trie_tpl(StrVecType& strVec, SortableStrVec& nestStrVec,
 						nextKey.length = uint32_t(fragStrLen);
 						nextStrVecStore->push_back(nextKey);
 					}
-					size_t freq = childEndRow - childBegRow;
 					conf.isHiFreqFrag.push_back(freq >= fragStrLen);
 					if (FastLabel) {
 						labelStore->push_back(childBegStr[parentBegCol]);
@@ -2615,6 +2662,20 @@ build_core_no_reverse_keys(SortableStrVec& strVec, valvec<byte_t>& label,
 	m_core_len_mask = (size_t(1) << lenBits) - 1;
 	m_core_min_len = byte_t(minLen);
 	m_core_max_link_val = strVec.str_size() << lenBits;
+}
+
+template<class RankSelect, class RankSelect2, bool FastLabel>
+void
+NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
+risk_layer_load_user_mem(const void* mem, size_t num, size_t len) {
+	TERARK_VERIFY_EQ(m_layer_id_rank.size(), 0);
+	TERARK_VERIFY_EQ(m_layer_id_rank.capacity(), 0);
+	TERARK_VERIFY_EQ(m_layer_ref, nullptr);
+	TERARK_VERIFY_EQ((sizeof(layer_id_rank_t) + sizeof(layer_ref_t)) * num, len);
+	m_layer_id_rank.risk_set_capacity(0);
+	m_layer_id_rank.risk_set_data((layer_id_rank_t*)(void*)mem);
+	m_layer_id_rank.risk_set_size(num);
+	m_layer_ref = (const layer_ref_t*)(m_layer_id_rank.end());
 }
 
 template<class RankSelect, class RankSelect2, bool FastLabel>
@@ -2969,4 +3030,3 @@ template class NestLoudsTrieTpl<rank_select_il_256_32_41, rank_select_mixed_xl_2
 */
 
 } // namespace terark
-

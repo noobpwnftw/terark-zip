@@ -9,6 +9,7 @@
 //#include <stdio.h>
 #include <assert.h>
 #include <string.h> // for memcpy
+#include <iterator>
 
 #include <terark/stdtypes.hpp>
 #include "IStream.hpp"
@@ -16,7 +17,6 @@
 
 //#include <boost/type_traits/integral_constant.hpp>
 #include <boost/mpl/bool.hpp>
-#include <boost/iterator.hpp>
 #include <boost/operators.hpp>
 
 #if defined(_WIN32) || defined(WIN32) || defined(_WIN64) || defined(WIN64)
@@ -138,4 +138,3 @@ protected:
 } // namespace terark
 
 #endif
-

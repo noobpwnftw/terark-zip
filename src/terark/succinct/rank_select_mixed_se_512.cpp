@@ -528,7 +528,9 @@ template size_t TERARK_DLL_EXPORT rank_select_mixed_se_512::zero_seq_revlen_dx<0
 template size_t TERARK_DLL_EXPORT rank_select_mixed_se_512::zero_seq_revlen_dx<1>(size_t endpos) const noexcept;
 
 template<size_t dimensions>
-size_t rank_select_mixed_se_512::select0_dx(size_t Rank0) const noexcept {
+inline
+size_t rank_select_mixed_se_512::select0_upper_bound_line_safe(size_t Rank0)
+const noexcept {
     assert(m_flags & (1 << (dimensions == 0 ? 1 : 4)));
     GUARD_MAX_RANK(0[dimensions], Rank0);
     size_t lo, hi;
@@ -550,6 +552,13 @@ size_t rank_select_mixed_se_512::select0_dx(size_t Rank0) const noexcept {
         else
             hi = mid;
     }
+    return lo;
+}
+
+template<size_t dimensions>
+size_t rank_select_mixed_se_512::select0_dx(size_t Rank0) const noexcept {
+    const RankCacheMixed* rank_cache = m_rank_cache;
+    size_t lo = select0_upper_bound_line_safe<dimensions>(Rank0);
     assert(Rank0 < LineBits * lo - rank_cache[lo].base[dimensions]);
     size_t line_bitpos = (lo-1) * LineBits;
     uint64_t rcRela = rank_cache[lo-1].rela[dimensions];
@@ -559,6 +568,21 @@ size_t rank_select_mixed_se_512::select0_dx(size_t Rank0) const noexcept {
 #define select0_nth64(n) line_bitpos + 64*n + \
     UintSelect1(~pBit64[n*2+dimensions], Rank0 - (hit + 64*n - rank512(rcRela, n)))
 
+  #if defined(__AVX512VL__) && defined(__AVX512BW__)
+    __m512i arr0 = _mm512_set_epi64(64*7, 64*6, 64*5, 64*4, 64*3, 64*2, 64*1, 0);
+    __m512i shift = _mm512_set_epi64(54, 45, 36, 27, 18, 9, 0, 64);
+    __m512i arr1 = _mm512_set1_epi64(rcRela);
+    __m512i arr2 = _mm512_srlv_epi64(arr1, shift);
+    __m512i arr3 = _mm512_and_epi64(arr2, _mm512_set1_epi64(0x1FF));
+    __m512i arr = _mm512_sub_epi64(arr0, arr3);
+    __m512i key = _mm512_set1_epi64(Rank0 - hit);
+    __mmask8 cmp = _mm512_cmpgt_epi64_mask(arr, key);
+    auto tz = _tzcnt_u32(cmp | (1u << 8)); // upper bound
+    TERARK_ASSERT_GE(tz, 1);
+    TERARK_ASSERT_LE(tz, 8);
+    tz -= 1; // arr[0] is always 0
+    return select0_nth64(tz); // rank512 must use TERARK_GET_BITS_64
+  #else
     if (Rank0 < hit + 64*4 - rank512(rcRela, 4)) {
         if (Rank0 < hit + 64*2 - rank512(rcRela, 2))
             if (Rank0 < hit + 64*1 - rank512(rcRela, 1))
@@ -582,6 +606,7 @@ size_t rank_select_mixed_se_512::select0_dx(size_t Rank0) const noexcept {
             else
                 return select0_nth64(7);
     }
+  #endif
 #undef select0_nth64
 }
 
@@ -589,7 +614,9 @@ template size_t TERARK_DLL_EXPORT rank_select_mixed_se_512::select0_dx<0>(size_t
 template size_t TERARK_DLL_EXPORT rank_select_mixed_se_512::select0_dx<1>(size_t Rank0) const noexcept;
 
 template<size_t dimensions>
-size_t rank_select_mixed_se_512::select1_dx(size_t Rank1) const noexcept {
+inline
+size_t rank_select_mixed_se_512::select1_upper_bound_line_safe(size_t Rank1)
+const noexcept {
     assert(m_flags & (1 << (dimensions == 0 ? 1 : 4)));
     GUARD_MAX_RANK(1[dimensions], Rank1);
     size_t lo, hi;
@@ -611,6 +638,13 @@ size_t rank_select_mixed_se_512::select1_dx(size_t Rank1) const noexcept {
         else
             hi = mid;
     }
+    return lo;
+}
+
+template<size_t dimensions>
+size_t rank_select_mixed_se_512::select1_dx(size_t Rank1) const noexcept {
+    const RankCacheMixed* rank_cache = m_rank_cache;
+    size_t lo = select1_upper_bound_line_safe<dimensions>(Rank1);
     assert(Rank1 < rank_cache[lo].base[dimensions]);
     size_t line_bitpos = (lo-1) * LineBits;
     uint64_t rcRela = rank_cache[lo-1].rela[dimensions];
@@ -620,6 +654,22 @@ size_t rank_select_mixed_se_512::select1_dx(size_t Rank1) const noexcept {
 #define select1_nth64(n) line_bitpos + 64*n + \
      UintSelect1(pBit64[n*2+dimensions], Rank1 - (hit + rank512(rcRela, n)))
 
+  #if defined(__AVX512VL__) && defined(__AVX512BW__)
+    // manual optimize, group 0 is always 0 and is not stored,
+    // the highest bit of 64bits is always 0, so right shift 63 yield 0,
+    // _mm512_srlv_epi64 set to 0 if shift count >= 64
+    __m512i shift = _mm512_set_epi64(54, 45, 36, 27, 18, 9, 0, 64);
+    __m512i arr1 = _mm512_set1_epi64(rcRela);
+    __m512i arr2 = _mm512_srlv_epi64(arr1, shift);
+    __m512i arr = _mm512_and_epi64(arr2, _mm512_set1_epi64(0x1FF));
+    __m512i key = _mm512_set1_epi64(Rank1 - hit);
+    __mmask8 cmp = _mm512_cmpgt_epi64_mask(arr, key);
+    auto tz = _tzcnt_u32(cmp | (1u << 8)); // upper bound
+    TERARK_ASSERT_GE(tz, 1);
+    TERARK_ASSERT_LE(tz, 8);
+    tz -= 1; // arr[0] is always 0
+    return select1_nth64(tz); // rank512 must use TERARK_GET_BITS_64
+  #else
     if (Rank1 < hit + rank512(rcRela, 4)) {
         if (Rank1 < hit + rank512(rcRela, 2))
             if (Rank1 < hit + rank512(rcRela, 1))
@@ -643,6 +693,7 @@ size_t rank_select_mixed_se_512::select1_dx(size_t Rank1) const noexcept {
             else
                 return select1_nth64(7);
     }
+  #endif
 #undef select1_nth64
 }
 

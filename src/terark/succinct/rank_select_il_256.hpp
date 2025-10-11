@@ -114,22 +114,22 @@ public:
     bool isall0() const { return m_max_rank1 == 0; }
     bool isall1() const { return m_max_rank0 == 0; }
 
-    size_t popcnt() const;
-    size_t popcnt(size_t startline, size_t lines) const;
+    size_t popcnt() const terark_pure_func;
+    size_t popcnt(size_t startline, size_t lines) const terark_pure_func;
 
     ///@returns number of continuous one/zero bits starts at bitpos
-    size_t one_seq_len(size_t bitpos) const;
-    size_t zero_seq_len(size_t bitpos) const;
+    size_t one_seq_len(size_t bitpos) const terark_pure_func;
+    size_t zero_seq_len(size_t bitpos) const terark_pure_func;
 
     ///@returns number of continuous one/zero bits ends at endpos
     ///@note return_value = endpos - start;
     ///        where bits[start-1] is 0/1 and bits[start, ... endpos) are all 1/0
-    size_t one_seq_revlen(size_t endpos) const;
-    size_t zero_seq_revlen(size_t endpos) const;
+    size_t one_seq_revlen(size_t endpos) const terark_pure_func;
+    size_t zero_seq_revlen(size_t endpos) const terark_pure_func;
     inline size_t rank0(size_t bitpos) const;
     inline size_t rank1(size_t bitpos) const;
-    size_t select0(size_t Rank0) const;
-    size_t select1(size_t Rank1) const;
+    size_t select0(size_t Rank0) const terark_pure_func;
+    size_t select1(size_t Rank1) const terark_pure_func;
     size_t max_rank1() const { return m_max_rank1; }
     size_t max_rank0() const { return m_max_rank0; }
 
@@ -170,9 +170,16 @@ public:
     static void fast_prefetch_rank1(const Line* /*m_lines*/, size_t /*bitpos*/)
         { /*_mm_prefetch((const char*)&m_lines[bitpos/LineBits].rlev1, _MM_HINT_T0);*/ }
 
-    static size_t fast_one_seq_len(const Line*, size_t bitpos);
+    static size_t fast_one_seq_len(const Line*, size_t bitpos) terark_pure_func;
 
 protected:
+    template<size_t Q> size_t select0_upper_bound_line_safe(size_t id) const;
+    template<size_t Q> size_t select1_upper_bound_line_safe(size_t id) const;
+    template<size_t Q>
+    static size_t select0_upper_bound_line(const Line* bits, const uint32_t* sel0, size_t id);
+    template<size_t Q>
+    static size_t select1_upper_bound_line(const Line* bits, const uint32_t* sel1, size_t id);
+
     template<size_t Q>
     static inline size_t fast_select0_q(const Line* bits, const uint32_t* sel0, const Line* rankCache, size_t id);
     template<size_t Q>
@@ -215,27 +222,40 @@ fast_select0(const Line* lines, const uint32_t* sel0, const Line*, size_t Rank0)
     return fast_select0_q<1>(lines, sel0, lines, Rank0);
 }
 template<size_t Q>
-inline size_t rank_select_il::
-fast_select0_q(const Line* lines, const uint32_t* sel0, const Line*, size_t Rank0) {
+inline size_t rank_select_il::select0_upper_bound_line
+(const Line* lines, const uint32_t* sel0, size_t Rank0) {
     size_t lo = sel0[Rank0 / (LineBits/Q)];
     size_t hi = sel0[Rank0 / (LineBits/Q) + 1];
-    if (hi - lo < 32/Q) {
-        while (LineBits * lo - lines[lo].rlev1 <= Rank0) lo++;
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        size_t mid_val = LineBits * mid - lines[mid].rlev1;
+        if (mid_val <= Rank0) // upper_bound
+            lo = mid + 1;
+        else
+            hi = mid;
     }
-    else {
-        while (lo < hi) {
-            size_t mid = (lo + hi) / 2;
-            size_t mid_val = LineBits * mid - lines[mid].rlev1;
-            if (mid_val <= Rank0) // upper_bound
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
-    }
+    return lo;
+}
+template<size_t Q>
+inline size_t rank_select_il::fast_select0_q
+(const Line* lines, const uint32_t* sel0, const Line*, size_t Rank0) {
+    size_t lo = select0_upper_bound_line<Q>(lines, sel0, Rank0);
     assert(Rank0 < LineBits * lo - lines[lo].rlev1);
     const Line& xx = lines[lo - 1];
     size_t hit = LineBits * (lo - 1) - xx.rlev1;
     size_t index = (lo-1) * LineBits; // base bit index
+  #if defined(__AVX512VL__) && defined(__AVX512BW__)
+    __m128i arr1 = _mm_set_epi32(64 * 3, 64 * 2, 64 * 1, 0);
+    __m128i arr2 = _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*(uint32_t*)xx.rlev2));
+    __m128i arr = _mm_sub_epi32(arr1, arr2); // xx.rlev2[0] is always 0
+    __m128i key = _mm_set1_epi32(uint32_t(Rank0 - hit));
+    __mmask8 cmp = _mm_cmpgt_epi32_mask(arr, key);
+    auto tz = _tzcnt_u32(cmp | (1u << 4)); // upper bound
+    TERARK_ASSERT_GE(tz, 1);
+    TERARK_ASSERT_LE(tz, 4);
+    tz -= 1;
+    return index + 64 * tz + UintSelect1(~xx.bit64[tz], Rank0 - (hit + 64 * tz - xx.rlev2[tz]));
+  #else
     if (Rank0 < hit + 64*2 - xx.rlev2[2]) {
         if (Rank0 < hit + 64*1 - xx.rlev2[1]) { // xx.rlev2[0] is always 0
             return index + 64*0 + UintSelect1(~xx.bit64[0], Rank0 - hit);
@@ -251,6 +271,7 @@ fast_select0_q(const Line* lines, const uint32_t* sel0, const Line*, size_t Rank
         return index + 64*3 + UintSelect1(
                 ~xx.bit64[3], Rank0 - (hit + 64*3 - xx.rlev2[3]));
     }
+  #endif
 }
 
 inline size_t rank_select_il::
@@ -258,27 +279,38 @@ fast_select1(const Line* lines, const uint32_t* sel1, const Line*, size_t Rank1)
     return fast_select1_q<1>(lines, sel1, lines, Rank1);
 }
 template<size_t Q>
-inline size_t rank_select_il::
-fast_select1_q(const Line* lines, const uint32_t* sel1, const Line*, size_t Rank1) {
+inline size_t rank_select_il::select1_upper_bound_line
+(const Line* lines, const uint32_t* sel1, size_t Rank1) {
     size_t lo = sel1[Rank1 / (LineBits/Q)];
     size_t hi = sel1[Rank1 / (LineBits/Q) + 1];
-    if (hi - lo < 32/Q) {
-        while (lines[lo].rlev1 <= Rank1) lo++;
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (lines[mid].rlev1 <= Rank1) // upper_bound
+            lo = mid + 1;
+        else
+            hi = mid;
     }
-    else {
-        while (lo < hi) {
-            size_t mid = (lo + hi) / 2;
-            if (lines[mid].rlev1 <= Rank1) // upper_bound
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
-    }
+    return lo;
+}
+template<size_t Q>
+inline size_t rank_select_il::fast_select1_q
+(const Line* lines, const uint32_t* sel1, const Line*, size_t Rank1) {
+    size_t lo = select1_upper_bound_line<Q>(lines, sel1, Rank1);
     assert(Rank1 < lines[lo].rlev1);
     const Line& xx = lines[lo - 1];
     size_t hit = xx.rlev1;
     assert(Rank1 >= hit);
     size_t index = (lo-1) * LineBits; // base bit index
+  #if defined(__AVX512VL__) && defined(__AVX512BW__)
+    __m128i arr = _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*(uint32_t*)xx.rlev2));
+    __m128i key = _mm_set1_epi32(uint32_t(Rank1 - hit));
+    __mmask8 cmp = _mm_cmpgt_epi32_mask(arr, key);
+    auto tz = _tzcnt_u32(cmp | (1u << 4)); // upper bound
+    TERARK_ASSERT_GE(tz, 1);
+    TERARK_ASSERT_LE(tz, 4);
+    tz -= 1;
+    return index + 64 * tz + UintSelect1(xx.bit64[tz], Rank1 - (hit + xx.rlev2[tz]));
+  #else
     if (Rank1 < hit + xx.rlev2[2]) {
         if (Rank1 < hit + xx.rlev2[1]) { // xx.rlev2[0] is always 0
             return index + UintSelect1(xx.bit64[0], Rank1 - hit);
@@ -294,6 +326,7 @@ fast_select1_q(const Line* lines, const uint32_t* sel1, const Line*, size_t Rank
         return index + 64*3 + UintSelect1(
                  xx.bit64[3], Rank1 - (hit + xx.rlev2[3]));
     }
+  #endif
 }
 
 typedef rank_select_il rank_select_il_256;

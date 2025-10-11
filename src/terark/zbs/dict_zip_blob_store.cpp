@@ -2612,6 +2612,7 @@ DictZipBlobStore::get_record_append_tpl(size_t recId, valvec<byte_t>* recData)
 const {
     auto readRaw = [this](size_t offset, size_t length) {
         auto base = (const byte_t*)this->m_mmapBase;
+        _mm_prefetch((const char*)base + offset, _MM_HINT_T0);
         return base + offset;
     };
     read_record_append_tpl<ZipOffset, CheckSumLevel,

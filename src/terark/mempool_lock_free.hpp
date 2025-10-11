@@ -6,6 +6,7 @@
 #include <boost/integer/static_log2.hpp>
 #include <boost/mpl/if.hpp>
 #include <mutex>
+#include <cstdint>
 
 namespace terark {
 
@@ -31,16 +32,37 @@ class MemPool_ThisType : private valvec<unsigned char> {
     static const size_t offset_shift = AlignSize == 4 ? boost::static_log2<AlignSize>::value : 0;
 
     typedef link_size_t link_t;
+    typedef typename boost::mpl::if_c<sizeof(link_size_t) == 4, uint64_t, link_size_t>::type head_raw_t;
+    static link_size_t head_decode(head_raw_t x) {
+        if (sizeof(link_size_t) == 4)
+            return link_size_t(uint32_t(x));
+        return link_size_t(x);
+    }
+    static head_raw_t head_init(link_size_t head) {
+        if (sizeof(link_size_t) == 4)
+            return head_raw_t(uint32_t(head));
+        return head_raw_t(head);
+    }
+    head_raw_t head_next_raw(head_raw_t observed, link_size_t new_head) const {
+        if (sizeof(link_size_t) == 4) {
+            uint32_t tag = uint32_t(observed >> 32);
+            tag ^= uint32_t(new_head) ^ m_head_seed;
+            tag = (tag << 5) | (tag >> (32 - 5));
+            tag += 1;
+            return (uint64_t(tag) << 32) | uint32_t(new_head);
+        }
+        return head_raw_t(new_head);
+    }
     struct huge_link_t {
         link_size_t size;
         link_size_t next[skip_list_level_max];
     };
     struct LockFreeHead {
-        link_size_t head;
+        head_raw_t  head;
         link_size_t cnt;
-        char   padding[64 - 2*sizeof(link_size_t)]; // avoid false sharing
+        char   padding[64 - sizeof(head_raw_t) - sizeof(link_size_t)]; // avoid false sharing
         LockFreeHead() {
-            head = link_size_t(list_tail);
+            head = head_init(link_size_t(list_tail));
             cnt = 0;
             memset(padding, 0, sizeof(padding));
         }
@@ -52,6 +74,7 @@ class MemPool_ThisType : private valvec<unsigned char> {
     huge_link_t huge_list; // huge_list.size is max height of skiplist
     valvec<LockFreeHead> free_list_lock_free;
     std::mutex  huge_mutex;
+    uint32_t    m_head_seed;
 
 #if defined(__GNUC__)
     unsigned int m_rand_seed = 1;
@@ -101,6 +124,7 @@ public:
         huge_node_cnt = 0;
         huge_list.size = 0;
         for(auto& next : huge_list.next) next = list_tail;
+        m_head_seed = 0x9E3779B9u ^ uint32_t((uintptr_t)this >> 4);
     }
     MemPool_ThisType(const MemPool_ThisType& y) : mem(y) {
         free_list_lock_free = y.free_list_lock_free;
@@ -108,6 +132,7 @@ public:
         huge_size_sum = y.huge_size_sum;
         huge_node_cnt = y.huge_node_cnt;
         huge_list = y.huge_list;
+        m_head_seed = y.m_head_seed;
     }
     MemPool_ThisType& operator=(const MemPool_ThisType& y) {
         if (&y == this)
@@ -130,6 +155,7 @@ public:
         huge_size_sum = y.huge_size_sum;
         huge_node_cnt = y.huge_node_cnt;
         huge_list = y.huge_list;
+        m_head_seed = y.m_head_seed;
         y.fragment_size = 0;
         y.huge_size_sum = 0;
         y.huge_node_cnt = 0;
@@ -232,11 +258,16 @@ public:
             size_t idx = request / align_size - 1;
             auto& head = as_atomic(free_list_lock_free[idx].head);
             auto& cnt  = as_atomic(free_list_lock_free[idx].cnt);
-            link_size_t next = head.load(std::memory_order_relaxed);
-            while (list_tail != next) {
-                if (head.compare_exchange_weak(next,
-                    *(link_size_t*)(database + AlignSize*size_t(next)),
-                    std::memory_order_release,
+            while (true) {
+                head_raw_t nextRaw = head.load(std::memory_order_acquire);
+                link_size_t next = head_decode(nextRaw);
+                if (list_tail == next)
+                    break;
+                const link_size_t newHead =
+                    *(link_size_t*)(database + AlignSize * size_t(next));
+                const head_raw_t desiredRaw = head_next_raw(nextRaw, newHead);
+                if (head.compare_exchange_weak(nextRaw, desiredRaw,
+                    std::memory_order_relaxed,
                     std::memory_order_relaxed))
                 {
                     as_atomic(fragment_size).fetch_sub(request, std::memory_order_relaxed);
@@ -283,7 +314,7 @@ public:
             size_t End;
             while ((End = pos + request) <= cap) {
                 if (as_atomic(mem::n).compare_exchange_weak(pos, End,
-                        std::memory_order_release,
+                        std::memory_order_relaxed,
                         std::memory_order_relaxed)) {
                     return pos;
                 }
@@ -306,7 +337,7 @@ public:
         if (newend <= c) {
             size_t oldend = pos + oldlen;
             if (as_atomic(n).compare_exchange_weak(oldend, newend,
-                                std::memory_order_release,
+                                std::memory_order_relaxed,
                                 std::memory_order_relaxed)) {
                 return pos;
             }
@@ -339,7 +370,7 @@ public:
         assert(pos + len <= n);
         size_t End = pos + len;
         if (as_atomic(mem::n).compare_exchange_weak(End, pos,
-                std::memory_order_release,
+                std::memory_order_relaxed,
                 std::memory_order_relaxed))
         {
             return;
@@ -349,13 +380,16 @@ public:
             size_t idx = len / align_size - 1;
             auto& head = as_atomic(free_list_lock_free[idx].head);
             auto& cnt  = as_atomic(free_list_lock_free[idx].cnt);
-            *(link_size_t*)(database + pos) = head.load(std::memory_order_relaxed);
+            head_raw_t observed = head.load(std::memory_order_relaxed);
+            *(link_size_t*)(database + pos) = head_decode(observed);
             link_size_t posVal = link_size_t(pos / AlignSize);
             while (!head.compare_exchange_weak(
-                    *(link_size_t*)(database + pos), posVal,
+                    observed, head_next_raw(observed, posVal),
                     std::memory_order_release,
                     std::memory_order_relaxed))
-            {}
+            {
+                *(link_size_t*)(database + pos) = head_decode(observed);
+            }
             cnt.fetch_add(1, std::memory_order_relaxed);
         }
         else {
@@ -398,6 +432,7 @@ public:
         std::swap(huge_size_sum, y.huge_size_sum);
         std::swap(huge_node_cnt, y.huge_node_cnt);
         std::swap(huge_list, y.huge_list);
+        std::swap(m_head_seed, y.m_head_seed);
         // don't swap huge_mutex
         std::swap(free_list_lock_free, y.free_list_lock_free);
     }
@@ -424,7 +459,7 @@ public:
         LockFreeHead* fastbin = self.free_list_lock_free.data();
         for (size_t i = 0; i < fastnum; ++i) {
             dio >> var;
-            fastbin[i].head = link_size_t(var.t);
+            fastbin[i].head = head_init(link_size_t(var.t));
             dio >> var;
             fastbin[i].cnt = link_size_t(var.t);
         }
@@ -444,7 +479,7 @@ public:
         dio << typename DataIO::my_var_size_t(self.huge_node_cnt);
         dio << typename DataIO::my_var_size_t(fastnum);
         for (size_t i = 0; i < fastnum; ++i) {
-            dio << typename DataIO::my_var_size_t(fastbin[i].head);
+            dio << typename DataIO::my_var_size_t(head_decode(fastbin[i].head));
             dio << typename DataIO::my_var_size_t(fastbin[i].cnt);
         }
         dio << static_cast<const mem&>(self);
@@ -453,4 +488,3 @@ public:
 #undef MemPool_ThisType
 
 } // namespace terark
-

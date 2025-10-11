@@ -959,18 +959,22 @@ const {
 	TERARK_SCOPE_EXIT(
 		free_save_mmap_ptrs(header.num_blocks, dataPtrs, need_free_mask);
 	);
-	header.crc32cLevel = 2;
+	header.crc32cLevel = 1;
 	header.file_crc32 = 0;
-	for(size_t i = 0, n = header.num_blocks; i < n; ++i) {
-		const byte_t* data = reinterpret_cast<const byte_t*>(dataPtrs[i]);
-		const size_t  nlen = header.blocks[i].length;
-		header.file_crc32 = Crc32c_update(header.file_crc32, data, nlen);
-		if (nlen % 64 != 0) {
-			static const char zeros[64] = {0};
-			header.file_crc32 =	Crc32c_update(header.file_crc32, zeros, 64-nlen%64);
+	if (header.crc32cLevel > 1) {
+		for(size_t i = 0, n = header.num_blocks; i < n; ++i) {
+			const byte_t* data = reinterpret_cast<const byte_t*>(dataPtrs[i]);
+			const size_t  nlen = header.blocks[i].length;
+			header.file_crc32 = Crc32c_update(header.file_crc32, data, nlen);
+			if (nlen % 64 != 0) {
+				static const char zeros[64] = {0};
+				header.file_crc32 =	Crc32c_update(header.file_crc32, zeros, 64-nlen%64);
+			}
 		}
 	}
-	header.header_crc32 = Crc32c_update(0, &header, sizeof(header)-4);
+	header.header_crc32 = 0;
+	if (header.crc32cLevel > 0)
+		header.header_crc32 = Crc32c_update(header.header_crc32, &header, sizeof(header)-4);
 	write(&header, sizeof(header));
 	for(size_t i = 0, n = header.num_blocks; i < n; ++i) {
 		assert(header.blocks[i].offset % 64 == 0);

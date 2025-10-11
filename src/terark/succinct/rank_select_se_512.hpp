@@ -36,8 +36,8 @@ public:
     size_t mem_size() const { return m_capacity / 8; }
     inline size_t rank1(size_t bitpos) const noexcept;
     inline size_t rank0(size_t bitpos) const noexcept;
-    size_t select0(size_t id) const noexcept;
-    size_t select1(size_t id) const noexcept;
+    size_t select0(size_t id) const noexcept terark_pure_func;
+    size_t select1(size_t id) const noexcept terark_pure_func;
     size_t max_rank1() const { return m_max_rank1; }
     size_t max_rank0() const { return m_max_rank0; }
     bool isall0() const { return m_max_rank1 == 0; }
@@ -61,6 +61,11 @@ protected:
     index_t*   m_sel1_cache;
     size_t     m_max_rank0;
     size_t     m_max_rank1;
+    inline std::pair<size_t, size_t> load_select0_cache_safe(size_t id) const noexcept;
+    inline std::pair<size_t, size_t> load_select1_cache_safe(size_t id) const noexcept;
+    static inline std::pair<size_t, size_t> load_select_cache(const index_t* sel_cache, size_t Rank);
+    static inline size_t select0_upper_bound_line(std::pair<size_t, size_t>, const RankCache512*, size_t id) noexcept;
+    static inline size_t select1_upper_bound_line(std::pair<size_t, size_t>, const RankCache512*, size_t id) noexcept;
 public:
     const RankCache512* get_rank_cache() const { return m_rank_cache; }
     const index_t* get_sel0_cache() const { return m_sel0_cache; }
@@ -115,10 +120,21 @@ fast_rank1(const bm_uint_t* bits, const RankCache512* rankCache, size_t bitpos) 
 }
 
 template<class rank_cache_base_t>
+inline std::pair<size_t, size_t>
+rank_select_se_512_tpl<rank_cache_base_t>::
+load_select_cache(const index_t* select_cache, size_t Rank) {
+    size_t lo = select_cache[Rank / LineBits];
+    size_t hi = select_cache[Rank / LineBits + 1];
+    return std::pair<size_t, size_t>(lo, hi);
+}
+
+template<class rank_cache_base_t>
 inline size_t rank_select_se_512_tpl<rank_cache_base_t>::
-fast_select0(const bm_uint_t* bits, const index_t* sel0, const RankCache512* rankCache, size_t Rank0) noexcept {
-    size_t lo = sel0[Rank0 / LineBits];
-    size_t hi = sel0[Rank0 / LineBits + 1];
+select0_upper_bound_line
+(std::pair<size_t, size_t> rng, const RankCache512* rankCache, size_t Rank0)
+noexcept {
+    size_t lo = rng.first;
+    size_t hi = rng.second;
     if (hi - lo < 32) {
         while (LineBits * lo - rankCache[lo].base <= Rank0) lo++;
     }
@@ -132,15 +148,40 @@ fast_select0(const bm_uint_t* bits, const index_t* sel0, const RankCache512* ran
                 hi = mid;
         }
     }
+    return lo;
+}
+
+template<class rank_cache_base_t>
+inline size_t rank_select_se_512_tpl<rank_cache_base_t>::fast_select0
+(const bm_uint_t* bits, const index_t* sel0, const RankCache512* rankCache, size_t Rank0)
+noexcept {
+    size_t lo = select0_upper_bound_line(load_select_cache(sel0, Rank0), rankCache, Rank0);
     assert(Rank0 < LineBits * lo - rankCache[lo].base);
+    const uint64_t* pBit64 = (const uint64_t*)(bits + LineWords * (lo-1));
+    _mm_prefetch((const char*)(pBit64+0), _MM_HINT_T0);
+    _mm_prefetch((const char*)(pBit64+7), _MM_HINT_T0);
     size_t hit = LineBits * (lo-1) - rankCache[lo-1].base;
     size_t line_bitpos = (lo-1) * LineBits;
     uint64_t rcRela = rankCache[lo-1].rela;
-    const uint64_t* pBit64 = (const uint64_t*)(bits + LineWords * (lo-1));
 
 #define select0_nth64(n) line_bitpos + 64*n + \
     UintSelect1(~pBit64[n], Rank0 - (hit + 64*n - rank512(rcRela, n)))
 
+  #if defined(__AVX512VL__) && defined(__AVX512BW__)
+    __m512i arr0 = _mm512_set_epi64(64*7, 64*6, 64*5, 64*4, 64*3, 64*2, 64*1, 0);
+    __m512i shift = _mm512_set_epi64(54, 45, 36, 27, 18, 9, 0, 64);
+    __m512i arr1 = _mm512_set1_epi64(rcRela);
+    __m512i arr2 = _mm512_srlv_epi64(arr1, shift);
+    __m512i arr3 = _mm512_and_epi64(arr2, _mm512_set1_epi64(0x1FF));
+    __m512i arr = _mm512_sub_epi64(arr0, arr3);
+    __m512i key = _mm512_set1_epi64(Rank0 - hit);
+    __mmask8 cmp = _mm512_cmpgt_epi64_mask(arr, key);
+    auto tz = _tzcnt_u32(cmp | (1u << 8)); // upper bound
+    TERARK_ASSERT_GE(tz, 1);
+    TERARK_ASSERT_LE(tz, 8);
+    tz -= 1;
+    return select0_nth64(tz); // rank512 must use TERARK_GET_BITS_64
+  #else
     if (Rank0 < hit + 64*4 - rank512(rcRela, 4)) {
         if (Rank0 < hit + 64*2 - rank512(rcRela, 2))
             if (Rank0 < hit + 64*1 - rank512(rcRela, 1))
@@ -164,14 +205,17 @@ fast_select0(const bm_uint_t* bits, const index_t* sel0, const RankCache512* ran
             else
                 return select0_nth64(7);
     }
+  #endif
 #undef select0_nth64
 }
 
 template<class rank_cache_base_t>
 inline size_t rank_select_se_512_tpl<rank_cache_base_t>::
-fast_select1(const bm_uint_t* bits, const index_t* sel1, const RankCache512* rankCache, size_t Rank1) noexcept {
-    size_t lo = sel1[Rank1 / LineBits];
-    size_t hi = sel1[Rank1 / LineBits + 1];
+select1_upper_bound_line
+(std::pair<size_t, size_t> rng, const RankCache512* rankCache, size_t Rank1)
+noexcept {
+    size_t lo = rng.first;
+    size_t hi = rng.second;
     if (hi - lo < 32) {
         while (rankCache[lo].base <= Rank1) lo++;
     }
@@ -185,15 +229,41 @@ fast_select1(const bm_uint_t* bits, const index_t* sel1, const RankCache512* ran
                 hi = mid;
         }
     }
+    return lo;
+}
+
+template<class rank_cache_base_t>
+inline size_t rank_select_se_512_tpl<rank_cache_base_t>::fast_select1
+(const bm_uint_t* bits, const index_t* sel1, const RankCache512* rankCache, size_t Rank1)
+noexcept {
+    size_t lo = select1_upper_bound_line(load_select_cache(sel1, Rank1), rankCache, Rank1);
     assert(Rank1 < rankCache[lo].base);
+    const uint64_t* pBit64 = (const uint64_t*)(bits + LineWords * (lo-1));
+    _mm_prefetch((const char*)(pBit64+0), _MM_HINT_T0);
+    _mm_prefetch((const char*)(pBit64+7), _MM_HINT_T0);
     size_t hit = rankCache[lo-1].base;
     size_t line_bitpos = (lo-1) * LineBits;
     uint64_t rcRela = rankCache[lo-1].rela;
-    const uint64_t* pBit64 = (const uint64_t*)(bits + LineWords * (lo-1));
 
 #define select1_nth64(n) line_bitpos + 64*n + \
      UintSelect1(pBit64[n], Rank1 - (hit + rank512(rcRela, n)))
 
+  #if defined(__AVX512VL__) && defined(__AVX512BW__)
+    // manual optimize, group 0 is always 0 and is not stored,
+    // the highest bit of 64bits is always 0, so right shift 63 yield 0,
+    // _mm512_srlv_epi64 set to 0 if shift count >= 64
+    __m512i shift = _mm512_set_epi64(54, 45, 36, 27, 18, 9, 0, 64);
+    __m512i arr1 = _mm512_set1_epi64(rcRela);
+    __m512i arr2 = _mm512_srlv_epi64(arr1, shift);
+    __m512i arr = _mm512_and_epi64(arr2, _mm512_set1_epi64(0x1FF));
+    __m512i key = _mm512_set1_epi64(Rank1 - hit);
+    __mmask8 cmp = _mm512_cmpgt_epi64_mask(arr, key);
+    auto tz = _tzcnt_u32(cmp | (1u << 8)); // upper bound
+    TERARK_ASSERT_GE(tz, 1);
+    TERARK_ASSERT_LE(tz, 8);
+    tz -= 1;
+    return select1_nth64(tz); // rank512 must use TERARK_GET_BITS_64
+  #else
     if (Rank1 < hit + rank512(rcRela, 4)) {
         if (Rank1 < hit + rank512(rcRela, 2))
             if (Rank1 < hit + rank512(rcRela, 1))
@@ -217,6 +287,7 @@ fast_select1(const bm_uint_t* bits, const index_t* sel1, const RankCache512* ran
             else
                 return select1_nth64(7);
     }
+  #endif
 #undef select1_nth64
 }
 

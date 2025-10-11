@@ -57,6 +57,7 @@
 #  define terark_used_static_obj __attribute__((used))
 #  define terark_no_inline     __attribute__((noinline))
 #  define terark_forceinline     inline __attribute__((always_inline))
+#  define terark_pure_func     __attribute__((pure))
 
 #else
 

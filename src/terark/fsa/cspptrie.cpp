@@ -109,12 +109,14 @@ inline static unsigned ThisCpuID() {
 */
 
 template<class T>
+terark_forceinline
 void cpback(T* dst, const T* src, size_t num) {
     for (size_t i = num; i-- > 0; ) {
         dst[i] = src[i];
     }
 }
 template<class T>
+terark_forceinline
 void cpfore(T* dst, const T* src, size_t num) {
     for (size_t i = 0; i < num; ++i) {
         dst[i] = src[i];
@@ -122,6 +124,7 @@ void cpfore(T* dst, const T* src, size_t num) {
 }
 
 template<class T>
+terark_forceinline
 bool array_eq(T* x, const T* y, size_t num) {
     for (size_t i = 0; i < num; ++i) {
         if (x[i] != y[i])
@@ -222,9 +225,10 @@ PatriciaMem<Align>::lazy_free_list(ConcurrentLevel conLevel) {
 }
 
 template<size_t Align>
+terark_flatten
 Patricia::WriterTokenPtr&
-PatriciaMem<Align>::tls_writer_token() {
-    if (MultiWriteMultiRead == m_mempool_concurrent_level) {
+PatriciaMem<Align>::tls_writer_token() noexcept {
+    if (terark_likely(MultiWriteMultiRead == m_mempool_concurrent_level)) {
         auto tc = m_mempool_lock_free.tls();
         auto lzf = static_cast<LazyFreeListTLS*>(tc);
         return lzf->m_writer_token;
@@ -252,9 +256,10 @@ ReaderTokenTLS_Holder::reuse(ReaderTokenTLS_Object* token) {
 }
 
 template<size_t Align>
-Patricia::ReaderToken* PatriciaMem<Align>::tls_reader_token() {
+terark_flatten
+Patricia::ReaderToken* PatriciaMem<Align>::tls_reader_token() noexcept {
     ReaderToken* tok = NULL;
-    if (MultiWriteMultiRead == m_mempool_concurrent_level) {
+    if (terark_likely(MultiWriteMultiRead == m_mempool_concurrent_level)) {
         auto tc = m_mempool_lock_free.tls();
         auto lzf = static_cast<LazyFreeListTLS*>(tc);
         assert(NULL != lzf->m_reader_token.get());
@@ -2296,6 +2301,11 @@ MainPatricia::add_state_move(size_t curr, byte_t ch,
                 }
                 assert(nil_state == a[node+2+ch].child);
                 a[node+2+ch].child = suffix_node;
+                if (a[node].meta.b_is_final) {
+                    tiny_memcpy_align_4(a + node +  2 + 256,
+                                        a + curr + 10 + n_children,
+                                        aligned_valzplen);
+                }
                 break;
             }
             my_alloc_node(10+n_children+1);

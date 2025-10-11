@@ -123,6 +123,12 @@ template<class NestTrie, class DawgType>
 size_t NestTrieDAWG<NestTrie, DawgType>::
 index(MatchContext& ctx, fstring str) const noexcept {
 	assert(m_trie->m_is_link.max_rank1() == this->m_zpath_states);
+	if (0 == (ctx.root | ctx.pos | ctx.zidx)) {
+		if (this->m_zpath_states > 0)
+			return index_impl_11(str);
+		else
+			return index_impl_01(str);
+	}
 	if (this->m_zpath_states > 0)
 		return index_impl_ctx<true>(ctx, str);
 	else
@@ -173,6 +179,10 @@ index_impl(fstring str) const noexcept {
 	auto loudsSel0 = trie->m_louds.get_sel0_cache();
 	auto loudsRank = trie->m_louds.get_rank_cache();
 	auto labelData = trie->m_label_data;
+	trie->m_louds.fast_prefetch_bit(loudsBits, 0);
+	trie->m_louds.fast_prefetch_bit(loudsBits, 256);
+	trie->m_louds.fast_prefetch_bit(loudsBits, 512);
+	trie->m_next_link.prefetch(0);
 	if (TryDACache && terark_unlikely(NULL != m_cache)) {
 		auto da = m_cache->get_double_array();
 		auto zpBase = m_cache->get_zpath_data_base();
@@ -226,13 +236,32 @@ index_impl(fstring str) const noexcept {
 		}
 	}
 	for (; nil_state != curr; ++i) {
+		// We expect NLT_FIND_PREFETCH_NEST_LINK should be faster, but the
+		// profiling results show it is not true, so disable it.
+		// #define NLT_FIND_PREFETCH_NEST_LINK
+		#if defined(NLT_FIND_PREFETCH_NEST_LINK)
+		std::pair<size_t, size_t> child_range;
+		#endif
 		if (HasLink && trie->is_pzip(curr)) {
 			const byte_t* zk = (const byte_t*)(str.p + i);
+			#if defined(NLT_FIND_PREFETCH_NEST_LINK)
+			size_t linkRank1 = trie->get_link_rank(curr);
+			trie->m_next_link.prefetch(linkRank1); // prefetch slow find_children_range
+			child_range = trie->find_children_range(curr, labelData, loudsBits, loudsSel0, loudsRank);
+			uint64_t linkVal = trie->get_link_val_by_rank(curr, linkRank1);
+			intptr_t matchLen = trie->matchZpath_link(linkVal, zk, str.n - i);
+			#else
 			intptr_t matchLen = trie->matchZpath(curr, zk, str.n - i);
+			#endif
 			if (matchLen <= 0)
 				return null_word;
 			i += matchLen;
 		}
+		#if defined(NLT_FIND_PREFETCH_NEST_LINK)
+		else if (HasLink || trie->is_fast_label) {
+			child_range = trie->find_children_range(curr, labelData, loudsBits, loudsSel0, loudsRank);
+		}
+		#endif
 		assert(i <= str.size());
 		if (terark_unlikely(str.size() == i)) {
 			if (this->is_term2(trie, curr))
@@ -242,7 +271,11 @@ index_impl(fstring str) const noexcept {
 		}
 		byte_t ch = (byte_t)str.p[i];
 		if (HasLink || trie->is_fast_label)
+			#if defined(NLT_FIND_PREFETCH_NEST_LINK)
+			curr = trie->find_child(child_range, ch, labelData);
+			#else
 			curr = trie->state_move_fast2(curr, ch, labelData, loudsBits, loudsSel0, loudsRank);
+			#endif
 		else
 			curr = trie->template state_move_smart<HasLink>(curr, ch);
 	}
@@ -258,10 +291,7 @@ index_impl_ctx(MatchContext& ctx, fstring str) const noexcept {
 //	assert(0 == ctx.pos);
 //	assert(0 == ctx.zidx);
 	size_t curr = ctx.root;
-	if (0 == (curr | ctx.pos | ctx.zidx)) {
-		return index_impl<HasLink>(str);
-	}
-	else {
+	{
 		auto trie = m_trie;
 		auto loudsBits = trie->m_louds.bldata();
 		auto loudsSel0 = trie->m_louds.get_sel0_cache();

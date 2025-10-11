@@ -269,8 +269,13 @@ public:
 //#define ByPermanentID SimplePermanentID
 
 static const size_t HUGE_PAGE_SIZE = 2 << 20; // 2MB
+#if defined(_MSC_VER)
 static const size_t PAGE_SIZE = 4096;
 static const size_t PAGE_BITS = 12;
+#else
+static const size_t PAGE_SIZE = sysconf(_SC_PAGE_SIZE);
+static const size_t PAGE_BITS = __builtin_ctz(PAGE_SIZE);
+#endif
 static const uint32_t nillink = UINT32_MAX;
 using std::memory_order_relaxed;
 

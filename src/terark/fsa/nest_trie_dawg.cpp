@@ -123,6 +123,12 @@ template<class NestTrie, class DawgType>
 size_t NestTrieDAWG<NestTrie, DawgType>::
 index(MatchContext& ctx, fstring str) const noexcept {
 	assert(m_trie->m_is_link.max_rank1() == this->m_zpath_states);
+	if (0 == (ctx.root | ctx.pos | ctx.zidx)) {
+		if (this->m_zpath_states > 0)
+			return index_impl_11(str);
+		else
+			return index_impl_01(str);
+	}
 	if (this->m_zpath_states > 0)
 		return index_impl_ctx<true>(ctx, str);
 	else
@@ -173,6 +179,9 @@ index_impl(fstring str) const noexcept {
 	auto loudsSel0 = trie->m_louds.get_sel0_cache();
 	auto loudsRank = trie->m_louds.get_rank_cache();
 	auto labelData = trie->m_label_data;
+	trie->m_louds.fast_prefetch_bit(loudsBits, 0);
+	trie->m_louds.fast_prefetch_bit(loudsBits, 256);
+	trie->m_louds.fast_prefetch_bit(loudsBits, 512);
 	if (TryDACache && terark_unlikely(NULL != m_cache)) {
 		auto da = m_cache->get_double_array();
 		auto zpBase = m_cache->get_zpath_data_base();
@@ -226,13 +235,32 @@ index_impl(fstring str) const noexcept {
 		}
 	}
 	for (; nil_state != curr; ++i) {
+		// We expect NLT_FIND_PREFETCH_NEST_LINK should be faster, but the
+		// profiling results show it is not true, so disable it.
+		// #define NLT_FIND_PREFETCH_NEST_LINK
+		#if defined(NLT_FIND_PREFETCH_NEST_LINK)
+		std::pair<size_t, size_t> child_range;
+		#endif
 		if (HasLink && trie->is_pzip(curr)) {
 			const byte_t* zk = (const byte_t*)(str.p + i);
+			#if defined(NLT_FIND_PREFETCH_NEST_LINK)
+			size_t linkRank1 = trie->get_link_rank(curr);
+			trie->m_next_link.prefetch(linkRank1); // prefetch slow find_children_range
+			child_range = trie->find_children_range(curr, labelData, loudsBits, loudsSel0, loudsRank);
+			uint64_t linkVal = trie->get_link_val_by_rank(curr, linkRank1);
+			intptr_t matchLen = trie->matchZpath_link(linkVal, zk, str.n - i);
+			#else
 			intptr_t matchLen = trie->matchZpath(curr, zk, str.n - i);
+			#endif
 			if (matchLen <= 0)
 				return null_word;
 			i += matchLen;
 		}
+		#if defined(NLT_FIND_PREFETCH_NEST_LINK)
+		else if (HasLink || trie->is_fast_label) {
+			child_range = trie->find_children_range(curr, labelData, loudsBits, loudsSel0, loudsRank);
+		}
+		#endif
 		assert(i <= str.size());
 		if (terark_unlikely(str.size() == i)) {
 			if (this->is_term2(trie, curr))
@@ -242,7 +270,11 @@ index_impl(fstring str) const noexcept {
 		}
 		byte_t ch = (byte_t)str.p[i];
 		if (HasLink || trie->is_fast_label)
+			#if defined(NLT_FIND_PREFETCH_NEST_LINK)
+			curr = trie->find_child(child_range, ch, labelData);
+			#else
 			curr = trie->state_move_fast2(curr, ch, labelData, loudsBits, loudsSel0, loudsRank);
+			#endif
 		else
 			curr = trie->template state_move_smart<HasLink>(curr, ch);
 	}
@@ -258,10 +290,7 @@ index_impl_ctx(MatchContext& ctx, fstring str) const noexcept {
 //	assert(0 == ctx.pos);
 //	assert(0 == ctx.zidx);
 	size_t curr = ctx.root;
-	if (0 == (curr | ctx.pos | ctx.zidx)) {
-		return index_impl<HasLink>(str);
-	}
-	else {
+	{
 		auto trie = m_trie;
 		auto loudsBits = trie->m_louds.bldata();
 		auto loudsSel0 = trie->m_louds.get_sel0_cache();
@@ -492,6 +521,15 @@ NestTrieDAWG<NestTrie, DawgType>::dict_rank_to_state(size_t rank) const noexcept
 	return m_trie->dict_rank_to_state(rank, getIsTerm());
 }
 
+struct DictRankMetaData {
+	uint64_t m_num_layer;
+	uint64_t m_max_layer_id;
+	uint64_t m_max_layer_size;
+	bool has_dict_rank_block() const {
+		 return m_num_layer && m_max_layer_size;
+	}
+};
+
 template<class NestTrie, class DawgType>
 void
 NestTrieDAWG<NestTrie, DawgType>::finish_load_mmap(const DFA_MmapHeader* base) {
@@ -499,16 +537,27 @@ NestTrieDAWG<NestTrie, DawgType>::finish_load_mmap(const DFA_MmapHeader* base) {
 	byte_t* bbase = (byte_t*)base;
 	m_trie = new NestTrie();
 	size_t i = 0;
+	auto dict_rank_block = (const DictRankMetaData*)base->reserve1;
+	bool has_dict_rank_block = dict_rank_block->has_dict_rank_block();
+	if (has_dict_rank_block) {
+		m_trie->risk_layer_load_user_mem(bbase  + base->blocks[0].offset,
+			size_t(dict_rank_block->m_num_layer), base->blocks[0].length);
+		m_trie->m_max_layer_id   = dict_rank_block->m_max_layer_id;
+		m_trie->m_max_layer_size = dict_rank_block->m_max_layer_size;
+		i++;
+	}
 	if (!NestTrie::is_link_rs_mixed::value) {
-		i = 1;
-		getIsTerm().risk_mmap_from(bbase + base->blocks[0].offset, base->blocks[0].length);
-		TERARK_VERIFY_EQ(base->num_blocks, 2);
+		getIsTerm().risk_mmap_from(bbase + base->blocks[i].offset, base->blocks[i].length);
+		TERARK_VERIFY_GE(base->num_blocks, i+2);
+		i++;
 	}
 	else {
-		TERARK_VERIFY_EQ(base->num_blocks, 1);
+		TERARK_VERIFY_GE(base->num_blocks, i+1);
 	}
 	m_trie->load_mmap(bbase + base->blocks[i].offset, base->blocks[i].length);
-	m_trie->init_for_term(getIsTerm());
+	if (!has_dict_rank_block) {
+		m_trie->init_for_term(getIsTerm());
+	}
 	m_trie->m_max_strlen = base->atom_dfa_num;
 	if (m_trie->m_max_strlen == 0) { // always 0 for old NLT File
 		// will over allocate memory for Iterator
@@ -566,19 +615,27 @@ prepare_save_mmap(DFA_MmapHeader* base, const void** dataPtrs) const {
 	long need_free_mask = 0;
 	size_t blockIndex = 0;
 	size_t blockOffset = sizeof(DFA_MmapHeader);
-	if (!NestTrie::is_link_rs_mixed::value) {
-		dataPtrs[0] = getIsTerm().bldata();
-		base->blocks[0].offset = sizeof(DFA_MmapHeader);
-		base->blocks[0].length = getIsTerm().mem_size();
-		base->num_blocks = 2;
-		blockIndex = 1;
+	static bool wireLayerData = getEnvBool("NestLoudsTrie_wireLayerData", true);
+	if (wireLayerData) {
+		auto dict_rank_block = (DictRankMetaData*)base->reserve1;
+		dict_rank_block->m_num_layer = m_trie->layer_vec_size();
+		dict_rank_block->m_max_layer_id = m_trie->m_max_layer_id;
+		dict_rank_block->m_max_layer_size = m_trie->m_max_layer_size;
+		dataPtrs[0] = m_trie->layer_data_ptr();
+		base->blocks[0].offset = blockOffset;
+		base->blocks[0].length = m_trie->layer_data_len();
 		blockOffset = align_to_64(base->blocks[0].endpos());
-		need_free_mask = long(1) << 1;
+		blockIndex++;
 	}
-	else {
-		base->num_blocks = 1;
-		need_free_mask = long(1) << 0;
+	if (!NestTrie::is_link_rs_mixed::value) {
+		dataPtrs[blockIndex] = getIsTerm().bldata();
+		base->blocks[blockIndex].offset = blockOffset;
+		base->blocks[blockIndex].length = getIsTerm().mem_size();
+		blockOffset = align_to_64(base->blocks[blockIndex].endpos());
+		blockIndex++;
 	}
+	base->num_blocks = blockIndex + 1;
+	need_free_mask = long(1) << blockIndex;
 	size_t trie_mem_size = 0;
 	byte_t const* tmpbuf = m_trie->save_mmap(&trie_mem_size);
 	dataPtrs[blockIndex] = tmpbuf;

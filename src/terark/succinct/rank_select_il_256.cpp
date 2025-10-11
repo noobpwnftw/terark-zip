@@ -198,12 +198,12 @@ size_t rank_select_il::one_seq_len(size_t bitpos) const {
 
 size_t rank_select_il::fast_one_seq_len(const Line* lines, size_t bitpos) {
     size_t j = bitpos / LineBits, k, sum;
-    if (bitpos % WordBits != 0) {
+    if (terark_likely(bitpos % WordBits != 0)) {
         bm_uint_t x = lines[j].words[bitpos%LineBits / WordBits];
         if (!(x & (bm_uint_t(1) << bitpos%WordBits))) return 0;
         bm_uint_t y = ~(x >> bitpos%WordBits);
         size_t ctz = fast_ctz(y);
-        if (ctz < WordBits - bitpos%WordBits) {
+        if (terark_likely(ctz < WordBits - bitpos%WordBits)) {
             // last zero bit after bitpos is in x
             return ctz;
         }
@@ -232,11 +232,11 @@ size_t rank_select_il::fast_one_seq_len(const Line* lines, size_t bitpos) {
 size_t rank_select_il::zero_seq_len(size_t bitpos) const {
     assert(bitpos < this->size());
     size_t j = bitpos / LineBits, k, sum;
-    if (bitpos % WordBits != 0) {
+    if (terark_likely(bitpos % WordBits != 0)) {
         bm_uint_t x = m_lines[j].words[bitpos%LineBits / WordBits];
         if (x & (bm_uint_t(1) << bitpos%WordBits)) return 0;
         bm_uint_t y = x >> bitpos%WordBits;
-        if (y) {
+        if (terark_likely(y)) {
             // last zero bit after bitpos is in x
             return fast_ctz(y);
         }
@@ -335,7 +335,7 @@ size_t rank_select_il::select0(size_t Rank0) const {
 }
 template<size_t Q>
 inline
-size_t rank_select_il::select0_q(size_t Rank0) const {
+size_t rank_select_il::select0_upper_bound_line_safe(size_t Rank0) const {
     GUARD_MAX_RANK(0, Rank0);
     size_t lo, hi;
     if (m_fast_select0) { // get the very small [lo, hi) range
@@ -356,10 +356,28 @@ size_t rank_select_il::select0_q(size_t Rank0) const {
         else
             hi = mid;
     }
+    return lo;
+}
+template<size_t Q>
+inline size_t rank_select_il::select0_q(size_t Rank0) const {
+    const Line* lines = m_lines.data();
+    size_t lo = select0_upper_bound_line_safe<Q>(Rank0);
     assert(Rank0 < LineBits * lo - lines[lo].rlev1);
     const Line& xx = lines[lo - 1];
     size_t hit = LineBits * (lo - 1) - xx.rlev1;
     size_t index = (lo-1) * LineBits; // base bit index
+  #if defined(__AVX512VL__) && defined(__AVX512BW__)
+    __m128i arr1 = _mm_set_epi32(64 * 3, 64 * 2, 64 * 1, 0);
+    __m128i arr2 = _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*(uint32_t*)xx.rlev2));
+    __m128i arr = _mm_sub_epi32(arr1, arr2); // xx.rlev2[0] is always 0
+    __m128i key = _mm_set1_epi32(uint32_t(Rank0 - hit));
+    __mmask8 cmp = _mm_cmpgt_epi32_mask(arr, key);
+    auto tz = _tzcnt_u32(cmp | (1u << 4)); // upper bound
+    TERARK_ASSERT_GE(tz, 1);
+    TERARK_ASSERT_LE(tz, 4);
+    tz -= 1;
+    return index + 64 * tz + UintSelect1(~xx.bit64[tz], Rank0 - (hit + 64 * tz - xx.rlev2[tz]));
+  #else
     if (Rank0 < hit + 64*2 - xx.rlev2[2]) {
         if (Rank0 < hit + 64*1 - xx.rlev2[1]) { // xx.rlev2[0] is always 0
             return index + 64*0 + UintSelect1(~xx.bit64[0], Rank0 - hit);
@@ -375,6 +393,7 @@ size_t rank_select_il::select0_q(size_t Rank0) const {
         return index + 64*3 + UintSelect1(
                 ~xx.bit64[3], Rank0 - (hit + 64*3 - xx.rlev2[3]));
     }
+  #endif
 }
 
 size_t rank_select_il::select1(size_t Rank1) const {
@@ -382,7 +401,7 @@ size_t rank_select_il::select1(size_t Rank1) const {
 }
 template<size_t Q>
 inline
-size_t rank_select_il::select1_q(size_t Rank1) const {
+size_t rank_select_il::select1_upper_bound_line_safe(size_t Rank1) const {
     GUARD_MAX_RANK(1, Rank1);
     size_t lo, hi;
     if (m_fast_select1) { // get the very small [lo, hi) range
@@ -402,11 +421,27 @@ size_t rank_select_il::select1_q(size_t Rank1) const {
         else
             hi = mid;
     }
+    return lo;
+}
+template<size_t Q>
+inline size_t rank_select_il::select1_q(size_t Rank1) const {
+    const Line* lines = m_lines.data();
+    size_t lo = select1_upper_bound_line_safe<Q>(Rank1);
     assert(Rank1 < lines[lo].rlev1);
     const Line& xx = lines[lo - 1];
     size_t hit = xx.rlev1;
     assert(Rank1 >= hit);
     size_t index = (lo-1) * LineBits; // base bit index
+  #if defined(__AVX512VL__) && defined(__AVX512BW__)
+    __m128i arr = _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*(uint32_t*)xx.rlev2));
+    __m128i key = _mm_set1_epi32(uint32_t(Rank1 - hit));
+    __mmask8 cmp = _mm_cmpgt_epi32_mask(arr, key);
+    auto tz = _tzcnt_u32(cmp | (1u << 4)); // upper bound
+    TERARK_ASSERT_GE(tz, 1);
+    TERARK_ASSERT_LE(tz, 4);
+    tz -= 1;
+    return index + 64 * tz + UintSelect1(xx.bit64[tz], Rank1 - (hit + xx.rlev2[tz]));
+  #else
     if (Rank1 < hit + xx.rlev2[2]) {
         if (Rank1 < hit + xx.rlev2[1]) { // xx.rlev2[0] is always 0
             return index + UintSelect1(xx.bit64[0], Rank1 - hit);
@@ -422,6 +457,7 @@ size_t rank_select_il::select1_q(size_t Rank1) const {
         return index + 64*3 + UintSelect1(
                  xx.bit64[3], Rank1 - (hit + xx.rlev2[3]));
     }
+  #endif
 }
 
 void rank_select_il::risk_mmap_from(unsigned char* base, size_t length) {

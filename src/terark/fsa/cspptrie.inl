@@ -97,8 +97,8 @@ public:
 
     void mem_lazy_free(size_t loc, size_t size);
 
-    WriterTokenPtr& tls_writer_token() final;
-    ReaderToken* tls_reader_token() final;
+    WriterTokenPtr& tls_writer_token() noexcept final;
+    ReaderToken* tls_reader_token() noexcept final;
 
 protected:
     struct LazyFreeItem {

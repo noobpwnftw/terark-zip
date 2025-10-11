@@ -404,7 +404,6 @@ risk_release_ownership() noexcept {
 	m_core_max_link_val = 0;
 	m_total_zpath_len = 0;
 	m_layer_id_rank.clear();
-	m_layer_ref.clear();
 	m_max_layer_id = 0;
 	m_max_layer_size = 0;
 	m_max_strlen = 0;
@@ -438,7 +437,7 @@ swap(NestLoudsTrieTpl& y) noexcept {
 	std::swap(m_total_zpath_len, y.m_total_zpath_len);
 	std::swap(m_next_trie, y.m_next_trie);
 	m_layer_id_rank.swap(y.m_layer_id_rank);
-	m_layer_ref.swap(y.m_layer_ref);
+	std::swap(m_layer_ref, y.m_layer_ref);
 	std::swap(m_max_layer_id, y.m_max_layer_id);
 	std::swap(m_max_layer_size, y.m_max_layer_size);
 	std::swap(m_max_strlen, y.m_max_strlen);
@@ -495,7 +494,11 @@ get_core_str(size_t node_id) const noexcept {
 	assert(NULL != m_core_data);
 	assert(m_core_size > 0);
 	uint64_t linkVal = get_link_val(node_id);
+#if defined(__BMI2__)
+	size_t length = _bzhi_u64(linkVal, m_core_len_bits) + m_core_min_len;
+#else
 	size_t length = size_t(linkVal  & m_core_len_mask) + m_core_min_len;
+#endif
 	size_t offset = size_t(linkVal >> m_core_len_bits);
 	assert(offset < m_core_size);
 	assert(offset + length <= m_core_size);
@@ -604,7 +607,11 @@ tpl_restore_next_string(size_t node_id, StrBuf* str) const noexcept {
 	BOOST_STATIC_ASSERT(sizeof(char_type) == 1);
 	auto coreData = (const char_type*)m_core_data;
 	if (linkVal < m_core_max_link_val) {
+#if defined(__BMI2__)
+		size_t length = _bzhi_u64(linkVal, m_core_len_bits) + m_core_min_len;
+#else
 		size_t length = size_t(linkVal &  m_core_len_mask) + m_core_min_len;
+#endif
 		size_t offset = size_t(linkVal >> m_core_len_bits);
 		assert(offset < m_core_size);
 		assert(offset + length <= m_core_size);
@@ -628,7 +635,11 @@ get_zpath_data(size_t node_id, MatchContext* ctx) const noexcept {
 	uint64_t linkVal = get_link_val(node_id);
 	if (linkVal < m_core_max_link_val) {
 		assert(NULL != m_core_data);
+#if defined(__BMI2__)
+		size_t length = _bzhi_u64(linkVal, m_core_len_bits) + m_core_min_len;
+#else
 		size_t length = size_t(linkVal &  m_core_len_mask) + m_core_min_len;
+#endif
 		size_t offset = size_t(linkVal >> m_core_len_bits);
 		assert(offset < m_core_size);
 		assert(offset + length <= m_core_size);
@@ -661,7 +672,11 @@ getZpathFixed(size_t node_id, byte_t* buf, size_t cap) const noexcept {
 	uint64_t linkVal = get_link_val(node_id);
 	if (linkVal < m_core_max_link_val) {
 		assert(NULL != m_core_data);
+#if defined(__BMI2__)
+		size_t length = _bzhi_u64(linkVal, m_core_len_bits) + m_core_min_len;
+#else
 		size_t length = size_t(linkVal &  m_core_len_mask) + m_core_min_len;
+#endif
 		size_t offset = size_t(linkVal >> m_core_len_bits);
 		assert(offset < m_core_size);
 		assert(offset + length <= m_core_size);
@@ -704,10 +719,20 @@ matchZpath(size_t node_id, const byte_t* str, size_t slen) const noexcept {
 	assert(node_id < m_is_link.size());
 	assert(m_is_link[node_id]);
 	uint64_t linkVal = get_link_val(node_id);
+	return matchZpath_link(linkVal, str, slen);
+}
+template<class RankSelect, class RankSelect2, bool FastLabel>
+intptr_t
+NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
+matchZpath_link(size_t linkVal, const byte_t* str, size_t slen) const noexcept {
 	size_t coreMaxLinkVal = m_core_max_link_val;
 	if (linkVal < coreMaxLinkVal) {
 		assert(NULL != m_core_data);
+#if defined(__BMI2__)
+		size_t length = _bzhi_u64(linkVal, m_core_len_bits) + m_core_min_len;
+#else
 		size_t length = size_t(linkVal &  m_core_len_mask) + m_core_min_len;
+#endif
 		size_t offset = size_t(linkVal >> m_core_len_bits);
 		assert(offset < m_core_size);
 		assert(offset + length <= m_core_size);
@@ -2615,6 +2640,20 @@ build_core_no_reverse_keys(SortableStrVec& strVec, valvec<byte_t>& label,
 	m_core_len_mask = (size_t(1) << lenBits) - 1;
 	m_core_min_len = byte_t(minLen);
 	m_core_max_link_val = strVec.str_size() << lenBits;
+}
+
+template<class RankSelect, class RankSelect2, bool FastLabel>
+void
+NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
+risk_layer_load_user_mem(const void* mem, size_t num, size_t len) {
+	TERARK_VERIFY_EQ(m_layer_id_rank.size(), 0);
+	TERARK_VERIFY_EQ(m_layer_id_rank.capacity(), 0);
+	TERARK_VERIFY_EQ(m_layer_ref, nullptr);
+	TERARK_VERIFY_EQ((sizeof(layer_id_rank_t) + sizeof(layer_ref_t)) * num, len);
+	m_layer_id_rank.risk_set_capacity(0);
+	m_layer_id_rank.risk_set_data((layer_id_rank_t*)(void*)mem);
+	m_layer_id_rank.risk_set_size(num);
+	m_layer_ref = (const layer_ref_t*)(m_layer_id_rank.end());
 }
 
 template<class RankSelect, class RankSelect2, bool FastLabel>

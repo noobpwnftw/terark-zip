@@ -56,8 +56,10 @@ static constexpr uint08_t FLAG_lock      = 0x1 << 7;
 #define prefetch(ptr) _mm_prefetch((const char*)(ptr), _MM_HINT_T0)
 
 #if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__x86_64) || defined(__amd64__) || defined(__amd64)
+#elif defined(__aarch64__)
+    #define _mm_pause() asm volatile("isb")
 #else
-   #define _mm_pause()
+    #define _mm_pause()
 #endif
 
 inline void cas_unlock(bool& lock) {
@@ -109,12 +111,14 @@ inline static unsigned ThisCpuID() {
 */
 
 template<class T>
+terark_forceinline
 void cpback(T* dst, const T* src, size_t num) {
     for (size_t i = num; i-- > 0; ) {
         dst[i] = src[i];
     }
 }
 template<class T>
+terark_forceinline
 void cpfore(T* dst, const T* src, size_t num) {
     for (size_t i = 0; i < num; ++i) {
         dst[i] = src[i];
@@ -122,6 +126,7 @@ void cpfore(T* dst, const T* src, size_t num) {
 }
 
 template<class T>
+terark_forceinline
 bool array_eq(T* x, const T* y, size_t num) {
     for (size_t i = 0; i < num; ++i) {
         if (x[i] != y[i])
@@ -222,9 +227,10 @@ PatriciaMem<Align>::lazy_free_list(ConcurrentLevel conLevel) {
 }
 
 template<size_t Align>
+terark_flatten
 Patricia::WriterTokenPtr&
-PatriciaMem<Align>::tls_writer_token() {
-    if (MultiWriteMultiRead == m_mempool_concurrent_level) {
+PatriciaMem<Align>::tls_writer_token() noexcept {
+    if (terark_likely(MultiWriteMultiRead == m_mempool_concurrent_level)) {
         auto tc = m_mempool_lock_free.tls();
         auto lzf = static_cast<LazyFreeListTLS*>(tc);
         return lzf->m_writer_token;
@@ -252,9 +258,10 @@ ReaderTokenTLS_Holder::reuse(ReaderTokenTLS_Object* token) {
 }
 
 template<size_t Align>
-Patricia::ReaderToken* PatriciaMem<Align>::tls_reader_token() {
+terark_flatten
+Patricia::ReaderToken* PatriciaMem<Align>::tls_reader_token() noexcept {
     ReaderToken* tok = NULL;
-    if (MultiWriteMultiRead == m_mempool_concurrent_level) {
+    if (terark_likely(MultiWriteMultiRead == m_mempool_concurrent_level)) {
         auto tc = m_mempool_lock_free.tls();
         auto lzf = static_cast<LazyFreeListTLS*>(tc);
         assert(NULL != lzf->m_reader_token.get());
@@ -755,7 +762,7 @@ void PatriciaMem<Align>::destroy() {
     }
     // delete waiting tokens, and check errors
     assert(m_token_tail->m_link.next == NULL);
-    while (!cas_weak(m_head_lock, false, true)) {
+    while (!cas_weak(m_head_lock, false, true, std::memory_order_acquire)) {
         _mm_pause();
     }
     for(TokenBase* curr = m_dummy.m_link.next; curr; ) {
@@ -1666,24 +1673,27 @@ auto update_curr_ptr_concurrent = [&](size_t newCurr, size_t nodeIncNum, int lin
     assert(!a[newCurr].meta.b_lazy_free);
     assert(nil_state != ni.node_size);
     //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    PatriciaNode parent_unlock, parent_locked;
-    PatriciaNode curr_unlock, curr_locked;
-    parent_unlock = as_atomic(a[parent]).load(std::memory_order_relaxed);
-    parent_unlock.meta.b_lazy_free = 0;
-    parent_unlock.meta.b_lock = 0;
-    parent_locked = parent_unlock;
-    parent_locked.meta.b_lock = 1;
-    if (!cas_weak(a[parent], parent_unlock, parent_locked)) {
+    uint08_t pflags, cflags;
+    pflags = as_atomic(a[parent].flags).load(std::memory_order_relaxed);
+    if (pflags & (FLAG_lock | FLAG_lazy_free)) {
         goto RaceCondition2;
     }
+    while (!cax_weak(a[parent].flags, pflags, uint08_t(pflags | FLAG_lock), std::memory_order_acquire)) {
+        if (pflags & (FLAG_lock | FLAG_lazy_free)) {
+            goto RaceCondition2;
+        }
+        _mm_pause();
+    }
     // now a[parent] is locked, try lock curr:
-    curr_unlock = as_atomic(a[curr]).load(std::memory_order_relaxed);
-    curr_unlock.meta.b_lazy_free = 0;
-    curr_unlock.meta.b_lock = 0;
-    curr_locked = curr_unlock;
-    curr_locked.meta.b_lazy_free = 1;
-    if (!cas_weak(a[curr], curr_unlock, curr_locked)) {
+    cflags = as_atomic(a[curr].flags).load(std::memory_order_relaxed);
+    if (cflags & (FLAG_lock | FLAG_lazy_free)) {
         goto RaceCondition1;
+    }
+    while (!cax_weak(a[curr].flags, cflags, uint08_t(cflags | FLAG_lazy_free), std::memory_order_acquire)) {
+        if (cflags & (FLAG_lock | FLAG_lazy_free)) {
+            goto RaceCondition1;
+        }
+        _mm_pause();
     }
     // now a[curr] is locked, because --
     // now a[curr] is set as lazyfree, lazyfree flag also implies lock
@@ -1691,7 +1701,7 @@ auto update_curr_ptr_concurrent = [&](size_t newCurr, size_t nodeIncNum, int lin
     if (!array_eq(backup, &a[curr + ni.n_skip].child, ni.n_children)) {
         goto RaceCondition0;
     }
-    if (cas_weak(a[curr_slot].child, uint32_t(curr), uint32_t(newCurr))) {
+    if (cas_strong(a[curr_slot].child, uint32_t(curr), uint32_t(newCurr))) {
         as_atomic(a[parent].flags).fetch_and(uint08_t(~FLAG_lock), std::memory_order_release);
         ullong age = token->m_link.verseq;
         assert(age >= m_dummy.m_min_age);
@@ -1966,7 +1976,7 @@ assert(pos < key.size());
     assert(0 == a[curr].meta.n_zpath_len);
     init_token_value_mw(-1, -1, suffix_node); // must before cas set child
     uint32_t nil = nil_state;
-    if (cas_weak(a[curr+2+ch].child, nil, uint32_t(suffix_node))) {
+    if (cas_strong(a[curr+2+ch].child, nil, uint32_t(suffix_node))) {
         as_atomic(a[curr+1].big.n_children).fetch_add(1, std::memory_order_relaxed);
         lzf->m_n_nodes += 1;
         lzf->m_n_words += 1;
@@ -2081,10 +2091,10 @@ MarkFinalStateOnFastNode: {
     assert(0 == a[curr].meta.b_lazy_free);
     assert(0 == a[curr].meta.n_zpath_len);
     size_t valpos = AlignSize * (curr + 2 + 256);
-    if (as_atomic(a[curr].flags).fetch_or(FLAG_set_final, std::memory_order_acq_rel) & FLAG_set_final) {
+    if (as_atomic(a[curr].flags).fetch_or(FLAG_set_final, std::memory_order_relaxed) & FLAG_set_final) {
       // very rare: other thread set final
       // FLAG_set_final is permanent for FastNode: once set, never clear
-      while (!(as_atomic(a[curr].flags).load(std::memory_order_relaxed) & FLAG_final)) {
+      while (!(as_atomic(a[curr].flags).load(std::memory_order_acquire) & FLAG_final)) {
           _mm_pause();
       }
       token->m_value = (char*)a->chars + valpos;
@@ -2296,6 +2306,11 @@ MainPatricia::add_state_move(size_t curr, byte_t ch,
                 }
                 assert(nil_state == a[node+2+ch].child);
                 a[node+2+ch].child = suffix_node;
+                if (a[node].meta.b_is_final) {
+                    tiny_memcpy_align_4(a + node +  2 + 256,
+                                        a + curr + 10 + n_children,
+                                        aligned_valzplen);
+                }
                 break;
             }
             my_alloc_node(10+n_children+1);
@@ -2946,7 +2961,7 @@ bool Patricia::TokenBase::dequeue(Patricia* trie1, TokenBase* delptrs[], size_t*
     while (true) {
         assert(NULL != curr);
         TokenBase* next = curr->m_link.next;
-        TokenFlags flags = curr->m_flags;
+        TokenFlags flags = as_atomic(curr->m_flags).load(std::memory_order_relaxed);
 
         // when acquire is ReleaseWait -> AcquireDone
         // this assert may be false positive
@@ -3049,7 +3064,7 @@ bool Patricia::TokenBase::dequeue(Patricia* trie1, TokenBase* delptrs[], size_t*
 void Patricia::TokenBase::mt_acquire(Patricia* trie1) {
   Retry:
     auto trie = static_cast<MainPatricia*>(trie1);
-    auto flags = m_flags;
+    auto flags = as_atomic(m_flags).load(std::memory_order_relaxed);
     switch (flags.state) {
     default:          TERARK_DIE("UnknownEnum == m_flags.state"); break;
     case AcquireDone: TERARK_DIE("AcquireDone == m_flags.state"); break;
@@ -3069,7 +3084,7 @@ void Patricia::TokenBase::mt_acquire(Patricia* trie1) {
         break;
     case ReleaseDone:
         m_flags = {AcquireDone, false};
-        while (!cas_weak(trie->m_head_lock, false, true)) {
+        while (!cas_weak(trie->m_head_lock, false, true, std::memory_order_acquire)) {
             _mm_pause();
         }
         as_atomic(trie->m_token_qlen).fetch_add(1, std::memory_order_relaxed);
@@ -3099,7 +3114,7 @@ void Patricia::TokenBase::mt_acquire(Patricia* trie1) {
         break;
     }
     if (this == trie->m_dummy.m_link.next) {
-        if (cas_strong(trie->m_head_lock, false, true)) {
+        if (cas_strong(trie->m_head_lock, false, true, std::memory_order_acquire)) {
             if (this == trie->m_dummy.m_link.next) {
                 m_flags.is_head = true;
             }
@@ -3139,13 +3154,13 @@ void Patricia::TokenBase::mt_release(Patricia* trie1) {
                     // do not change this->m_link.next, because other threads
                     // may calling acquire(append to the list)
                     // this is a dead token at head, may block the ring!
-                    m_flags = {ReleaseWait, false};
+                    as_atomic(m_flags).store({ReleaseWait, false}, std::memory_order_relaxed);
                     trie->m_head_is_dead = true;
                     return;
                 }
-                if (trie->m_head_lock || !cas_weak(trie->m_head_lock, false, true)) {
+                if (as_atomic(trie->m_head_lock).load(std::memory_order_relaxed) || !cas_weak(trie->m_head_lock, false, true, std::memory_order_acquire)) {
                     // be wait free
-                    m_flags = {ReleaseWait, false};
+                    as_atomic(m_flags).store({ReleaseWait, false}, std::memory_order_relaxed);
                     trie->m_head_is_dead = true;
                     return;
                 }
@@ -3167,7 +3182,7 @@ void Patricia::TokenBase::mt_release(Patricia* trie1) {
                     assert(this != m_link.next);
                     trie->m_head_is_dead = true;
                 }
-                m_flags = {ReleaseDone, false};
+                as_atomic(m_flags).store({ReleaseDone, false}, std::memory_order_relaxed);
                 m_value = NULL;
                 as_atomic(trie->m_token_qlen).fetch_sub(1, std::memory_order_relaxed);
                 as_atomic(trie->m_head_lock).store(false, std::memory_order_release);
@@ -3188,7 +3203,7 @@ void Patricia::TokenBase::mt_release(Patricia* trie1) {
                     }
                     break; // break switch, retry
                 }
-                if (trie->m_head_lock || !cas_weak(trie->m_head_lock, false, true)) {
+                if (as_atomic(trie->m_head_lock).load(std::memory_order_relaxed) || !cas_weak(trie->m_head_lock, false, true, std::memory_order_acquire)) {
                     // be wait free
                     if (cas_weak(m_flags, flags, {ReleaseWait, false})) {
                         trie->m_head_is_dead = true;
@@ -3243,11 +3258,7 @@ void Patricia::TokenBase::mt_release(Patricia* trie1) {
                     // old head set me as new head:
                     //   cas_strong can ensure is_head be true,
                     //   but we use cas_weak for performance
-                    flags = m_flags;
-                    TERARK_VERIFY_F(AcquireDone == flags.state,
-                                "(%d %d)", flags.state, flags.is_head);
                     //TERARK_VERIFY(this == trie->m_dummy.m_link.next); // false positive
-                    if (!flags.is_head) INFO(1, "cas_weak spuriously failed");
                 }
                 break; // retry
             case AcquireLock:
@@ -3285,7 +3296,7 @@ void Patricia::TokenBase::mt_update(Patricia* trie1) {
         //     //fprintf(stderr, "DEBUG: very rare: wait for other thread set queue head as me(this = %p)\n", this);
         //     return;
         // }
-        if (trie->m_head_lock || !cas_weak(trie->m_head_lock, false, true)) {
+        if (as_atomic(trie->m_head_lock).load(std::memory_order_relaxed) || !cas_weak(trie->m_head_lock, false, true, std::memory_order_acquire)) {
             // be wait free, do nothing
             return;
         }
@@ -3329,10 +3340,10 @@ void Patricia::TokenBase::mt_update(Patricia* trie1) {
 template<size_t Align>
 terark_no_inline
 void PatriciaMem<Align>::reclaim_head() {
-    if (m_head_lock) {
+    if (as_atomic(m_head_lock).load(std::memory_order_relaxed)) {
         return;
     }
-    if (terark_unlikely(!cas_weak(m_head_lock, false, true))) {
+    if (terark_unlikely(!cas_weak(m_head_lock, false, true, std::memory_order_acquire))) {
         return;
     }
     // before calling this function m_head_is_dead is true
@@ -3352,7 +3363,7 @@ void PatriciaMem<Align>::reclaim_head() {
     }
     while (true) {
         TokenBase* next = head->m_link.next;
-        auto flags = head->m_flags;
+        auto flags = as_atomic(head->m_flags).load(std::memory_order_relaxed);
         switch (flags.state) {
         default:          TERARK_DIE("UnknownEnum == m_flags.state"); break;
         case DisposeDone: TERARK_DIE("DisposeDone == m_flags.state"); break;
@@ -3425,7 +3436,7 @@ void Patricia::TokenBase::idle() {
     auto trie = static_cast<MainPatricia*>(m_trie);
     auto conLevel = trie->m_writing_concurrent_level;
     assert(ThisThreadID() == m_thread_id);
-    auto flags = m_flags;
+    auto flags = as_atomic(m_flags).load(std::memory_order_relaxed);
     TERARK_VERIFY_F(AcquireDone == flags.state, "real = %s", enum_cstr(flags.state));
     if (conLevel >= SingleThreadShared) {
         if (flags.is_head) {
@@ -3436,7 +3447,7 @@ void Patricia::TokenBase::idle() {
         m_live_verseq = m_link.verseq;
     }
     else if (trie->m_token_qlen) {
-        m_flags = {AcquireIdle, false};
+        as_atomic(m_flags).store({AcquireIdle, false}, std::memory_order_relaxed);
         if (flags.is_head)
             goto CleanForSetReadOnly;
     }
@@ -3445,7 +3456,7 @@ void Patricia::TokenBase::idle() {
     }
     return;
   CleanForSetReadOnly:
-    while (!cas_weak(trie->m_head_lock, false, true)) {
+    while (!cas_weak(trie->m_head_lock, false, true, std::memory_order_acquire)) {
         _mm_pause();
     }
     assert(this == trie->m_dummy.m_link.next);
@@ -3454,7 +3465,7 @@ void Patricia::TokenBase::idle() {
     TokenBase* curr = this->m_link.next;
     while (curr) {
         TokenBase* next = curr->m_link.next;
-        TokenFlags flags = curr->m_flags;
+        TokenFlags flags = as_atomic(curr->m_flags).load(std::memory_order_relaxed);
         TERARK_VERIFY(false == flags.is_head);
         switch (flags.state) {
         default:          TERARK_DIE("UnknownEnum == m_flags.state"); break;
@@ -3610,7 +3621,7 @@ void Patricia::WriterToken::acquire(Patricia* trie1) {
     assert(NULL == m_trie || trie == m_trie);
     assert(NoWriteReadOnly != conLevel);
   #if !defined(NDEBUG)
-    auto flags = m_flags; // must load
+    auto flags = as_atomic(m_flags).load(std::memory_order_relaxed); // must load
     TERARK_ASSERT_F(ReleaseDone == flags.state || ReleaseWait == flags.state
                  || AcquireIdle == flags.state || AcquireLock == flags.state,
             "m_flags.state = %d(%s)", flags.state, enum_cstr(flags.state));

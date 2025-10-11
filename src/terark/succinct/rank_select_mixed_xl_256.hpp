@@ -106,14 +106,14 @@ protected:
     }
     void build_cache_impl(bool speed_select0, bool speed_select1, size_t dimensions,
         void (rank_select_mixed_xl_256<Arity>::*bits_range_set0)(size_t i, size_t k));
-    template<size_t dimensions> size_t one_seq_len_dx(size_t bitpos) const noexcept;
-    template<size_t dimensions> size_t zero_seq_len_dx(size_t bitpos) const noexcept;
-    template<size_t dimensions> size_t one_seq_revlen_dx(size_t endpos) const noexcept;
-    template<size_t dimensions> size_t zero_seq_revlen_dx(size_t endpos) const noexcept;
+    template<size_t dimensions> size_t one_seq_len_dx(size_t bitpos) const noexcept terark_pure_func;
+    template<size_t dimensions> size_t zero_seq_len_dx(size_t bitpos) const noexcept terark_pure_func;
+    template<size_t dimensions> size_t one_seq_revlen_dx(size_t endpos) const noexcept terark_pure_func;
+    template<size_t dimensions> size_t zero_seq_revlen_dx(size_t endpos) const noexcept terark_pure_func;
     template<size_t dimensions> inline size_t rank0_dx(size_t bitpos) const noexcept;
     template<size_t dimensions> inline size_t rank1_dx(size_t bitpos) const noexcept;
-    template<size_t dimensions> size_t select0_dx(size_t id) const noexcept;
-    template<size_t dimensions> size_t select1_dx(size_t id) const noexcept;
+    template<size_t dimensions> size_t select0_dx(size_t id) const noexcept terark_pure_func;
+    template<size_t dimensions> size_t select1_dx(size_t id) const noexcept terark_pure_func;
 
 public:
     template<size_t dimensions>
@@ -164,6 +164,14 @@ protected:
     friend void instantiate_member_template_aux(MyClass*);
 
     const RankCacheMixed* get_rank_cache_base() const { return m_lines; }
+
+    template<size_t dimensions> size_t select0_upper_bound_line_safe(size_t id) const noexcept;
+    template<size_t dimensions> size_t select1_upper_bound_line_safe(size_t id) const noexcept;
+    template<size_t dimensions>
+    static size_t select0_upper_bound_line(const bldata_t* bits, const uint32_t* sel0, size_t id) noexcept;
+    template<size_t dimensions>
+    static size_t select1_upper_bound_line(const bldata_t* bits, const uint32_t* sel1, size_t id) noexcept;
+
 public:
     template<size_t dimensions>
     static inline bool fast_is0_dx(const bldata_t* bits, size_t i) noexcept;
@@ -181,10 +189,14 @@ public:
 
     template<size_t dimensions>
     void prefetch_bit_dx(size_t i) const noexcept
-      { _mm_prefetch((const char*)&m_lines[i / LineBits].words[i % LineBits / WordBits * Arity + dimensions], _MM_HINT_T0); }
+      { fast_prefetch_bit_dx<dimensions>(m_lines, i); }
     template<size_t dimensions>
     static void fast_prefetch_bit_dx(const bldata_t* m_lines, size_t i) noexcept
-      { _mm_prefetch((const char*)&m_lines[i / LineBits].words[i % LineBits / WordBits * Arity + dimensions], _MM_HINT_T0); }
+      { _mm_prefetch((const char*)&m_lines[i / LineBits].words[i % LineBits / WordBits * Arity + dimensions], _MM_HINT_T0);
+        // _mm_prefetch((const char*)&m_lines[i / LineBits].mixed[dimensions], _MM_HINT_T0);
+        // _mm_prefetch(((const char*)&m_lines[i / LineBits]), _MM_HINT_T0);
+        // _mm_prefetch(((const char*)&m_lines[i / LineBits]) + sizeof(bldata_t) - 1, _MM_HINT_T0);
+      }
 
     template<size_t dimensions>
     void prefetch_rank1_dx(size_t /*bitpos*/) const noexcept
@@ -245,8 +257,8 @@ fast_rank1_dx(const bldata_t* m_lines, const RankCacheMixed*, size_t bitpos) noe
 
 template<size_t Arity>
 template<size_t dimensions>
-inline size_t rank_select_mixed_xl_256<Arity>::
-fast_select0_dx(const bldata_t* m_lines, const uint32_t* sel0, const RankCacheMixed*, size_t Rank0) noexcept {
+inline size_t rank_select_mixed_xl_256<Arity>::select0_upper_bound_line
+(const bldata_t* m_lines, const uint32_t* sel0, size_t Rank0) noexcept {
     size_t lo, hi;
     lo = sel0[Rank0 / LineBits];
     hi = sel0[Rank0 / LineBits + 1];
@@ -258,11 +270,32 @@ fast_select0_dx(const bldata_t* m_lines, const uint32_t* sel0, const RankCacheMi
         else
             hi = mid;
     }
+    return lo;
+}
+template<size_t Arity>
+template<size_t dimensions>
+inline size_t rank_select_mixed_xl_256<Arity>::fast_select0_dx
+(const bldata_t* m_lines, const uint32_t* sel0, const RankCacheMixed*, size_t Rank0)
+noexcept {
+    size_t lo = select0_upper_bound_line<dimensions>(m_lines, sel0, Rank0);
     assert(Rank0 < LineBits * lo - m_lines[lo].mixed[dimensions].base);
     const auto& xx = m_lines[lo - 1];
     size_t hit = LineBits * (lo - 1) - xx.mixed[dimensions].base;
     size_t index = (lo - 1) * LineBits; // base bit index
 
+  #if defined(__AVX512VL__) && defined(__AVX512BW__)
+    __m128i arr1 = _mm_set_epi32(64 * 3, 64 * 2, 64 * 1, 0);
+    __m128i arr2 = _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*(uint32_t*)xx.mixed[dimensions].rlev));
+    __m128i arr = _mm_sub_epi32(arr1, arr2); // rlev[0] is always 0
+    __m128i key = _mm_set1_epi32(uint32_t(Rank0 - hit));
+    __mmask8 cmp = _mm_cmpgt_epi32_mask(arr, key);
+    auto tz = _tzcnt_u32(cmp | (1u << 4)); // upper bound
+    TERARK_ASSERT_GE(tz, 1);
+    TERARK_ASSERT_LE(tz, 4);
+    tz -= 1;
+    return index + 64 * tz + UintSelect1(
+        ~xx.bit64[tz * Arity + dimensions], Rank0 - (hit + 64 * tz - xx.mixed[dimensions].rlev[tz]));
+  #else
     if (Rank0 < hit + 64 * 2 - xx.mixed[dimensions].rlev[2]) {
         if (Rank0 < hit + 64 * 1 - xx.mixed[dimensions].rlev[1]) { // xx.rlev[0] is always 0
             return index + 64 * 0 + UintSelect1(~xx.bit64[dimensions], Rank0 - hit);
@@ -278,12 +311,13 @@ fast_select0_dx(const bldata_t* m_lines, const uint32_t* sel0, const RankCacheMi
         return index + 64 * 3 + UintSelect1(
             ~xx.bit64[3 * Arity + dimensions], Rank0 - (hit + 64 * 3 - xx.mixed[dimensions].rlev[3]));
     }
+  #endif
 }
 
 template<size_t Arity>
 template<size_t dimensions>
-inline size_t rank_select_mixed_xl_256<Arity>::
-fast_select1_dx(const bldata_t* m_lines, const uint32_t* sel1, const RankCacheMixed*, size_t Rank1) noexcept {
+inline size_t rank_select_mixed_xl_256<Arity>::select1_upper_bound_line
+(const bldata_t* m_lines, const uint32_t* sel1, size_t Rank1) noexcept {
     size_t lo, hi;
     lo = sel1[Rank1 / LineBits];
     hi = sel1[Rank1 / LineBits + 1];
@@ -295,11 +329,30 @@ fast_select1_dx(const bldata_t* m_lines, const uint32_t* sel1, const RankCacheMi
         else
             hi = mid;
     }
+    return lo;
+}
+template<size_t Arity>
+template<size_t dimensions>
+inline size_t rank_select_mixed_xl_256<Arity>::fast_select1_dx
+(const bldata_t* m_lines, const uint32_t* sel1, const RankCacheMixed*, size_t Rank1)
+noexcept {
+    size_t lo = select1_upper_bound_line<dimensions>(m_lines, sel1, Rank1);
     assert(Rank1 < m_lines[lo].mixed[dimensions].base);
     const auto& xx = m_lines[lo - 1];
     size_t hit = xx.mixed[dimensions].base;
     assert(Rank1 >= hit);
     size_t index = (lo - 1) * LineBits; // base bit index
+  #if defined(__AVX512VL__) && defined(__AVX512BW__)
+    __m128i arr = _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*(uint32_t*)xx.mixed[dimensions].rlev));
+    __m128i key = _mm_set1_epi32(uint32_t(Rank1 - hit));
+    __mmask8 cmp = _mm_cmpgt_epi32_mask(arr, key);
+    auto tz = _tzcnt_u32(cmp | (1u << 4)); // upper bound
+    TERARK_ASSERT_GE(tz, 1);
+    TERARK_ASSERT_LE(tz, 4);
+    tz -= 1;
+    return index + 64 * tz + UintSelect1(
+        xx.bit64[tz * Arity + dimensions], Rank1 - (hit + xx.mixed[dimensions].rlev[tz]));
+  #else
     if (Rank1 < hit + xx.mixed[dimensions].rlev[2]) {
         if (Rank1 < hit + xx.mixed[dimensions].rlev[1]) { // xx.rlev[0] is always 0
             return index + UintSelect1(xx.bit64[dimensions], Rank1 - hit);
@@ -315,6 +368,7 @@ fast_select1_dx(const bldata_t* m_lines, const uint32_t* sel1, const RankCacheMi
         return index + 64 * 3 + UintSelect1(
             xx.bit64[3 * Arity + dimensions], Rank1 - (hit + xx.mixed[dimensions].rlev[3]));
     }
+  #endif
 }
 
 TERARK_NAME_TYPE(rank_select_mixed_xl_256_2_0, rank_select_mixed_dimensions<rank_select_mixed_xl_256<2>, 0>);

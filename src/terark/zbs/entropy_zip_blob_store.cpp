@@ -351,6 +351,7 @@ const {
     assert(recID + 1 < m_offsets.size());
     auto BegEnd = m_offsets.get2(recID);
     assert(BegEnd[0] <= BegEnd[1]);
+    _mm_prefetch((const char*)m_content.data() + BegEnd[0], _MM_HINT_T0);
     size_t len = BegEnd[1] - BegEnd[0];
     if (2 == m_checksumLevel) {
         if (kCRC16C == m_checksumType) {
@@ -650,8 +651,10 @@ public:
         init(freq);
     }
     void init(freq_hist_o1& freq) {
-        size_t entropy_len_o0 = freq_hist::estimate_size(freq.histogram());
-        size_t entropy_len_o1 = freq_hist_o1::estimate_size(freq.histogram());
+        // BlobStore is used for random access, DTable is resident in memory,
+        // so we need to take uncompressed DTable size into account
+        size_t entropy_len_o0 = freq_hist::estimate_size(freq.histogram()) + sizeof(Huffman::decoder);
+        size_t entropy_len_o1 = freq_hist_o1::estimate_size(freq.histogram()) + sizeof(Huffman::decoder_o1);
         freq.normalise(Huffman::NORMALISE);
         if (entropy_len_o0 * 15 / 16 < entropy_len_o1) {
             m_encoder_o0.reset(new Huffman::encoder(freq.histogram()));

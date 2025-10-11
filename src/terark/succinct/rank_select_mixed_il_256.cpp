@@ -530,7 +530,9 @@ template size_t TERARK_DLL_EXPORT rank_select_mixed_il_256::zero_seq_revlen_dx<0
 template size_t TERARK_DLL_EXPORT rank_select_mixed_il_256::zero_seq_revlen_dx<1>(size_t ebdpos) const noexcept;
 
 template<size_t dimensions>
-size_t rank_select_mixed_il_256::select0_dx(size_t Rank0) const noexcept {
+inline
+size_t rank_select_mixed_il_256::select0_upper_bound_line_safe(size_t Rank0)
+const noexcept {
     assert(m_flags & (1 << (dimensions == 0 ? 1 : 4)));
     GUARD_MAX_RANK(0[dimensions], Rank0);
     size_t lo, hi;
@@ -551,11 +553,28 @@ size_t rank_select_mixed_il_256::select0_dx(size_t Rank0) const noexcept {
         else
             hi = mid;
     }
+    return lo;
+}
+template<size_t dimensions>
+size_t rank_select_mixed_il_256::select0_dx(size_t Rank0) const noexcept {
+    size_t lo = select0_upper_bound_line_safe<dimensions>(Rank0);
     assert(Rank0 < LineBits * lo - m_lines[lo].mixed[dimensions].base);
     const auto& xx = m_lines[lo - 1].mixed[dimensions];
     size_t hit = LineBits * (lo - 1) - xx.base;
     size_t index = (lo-1) * LineBits; // base bit index
 
+  #if defined(__AVX512VL__) && defined(__AVX512BW__)
+    __m128i arr1 = _mm_set_epi32(64 * 3, 64 * 2, 64 * 1, 0);
+    __m128i arr2 = _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*(uint32_t*)xx.rlev));
+    __m128i arr = _mm_sub_epi32(arr1, arr2); // rlev[0] is always 0
+    __m128i key = _mm_set1_epi32(uint32_t(Rank0 - hit));
+    __mmask8 cmp = _mm_cmpgt_epi32_mask(arr, key);
+    auto tz = _tzcnt_u32(cmp | (1u << 4)); // upper bound
+    TERARK_ASSERT_GE(tz, 1);
+    TERARK_ASSERT_LE(tz, 4);
+    tz -= 1;
+    return index + 64 * tz + UintSelect1(~xx.bit64[tz], Rank0 - (hit + 64 * tz - xx.rlev[tz]));
+  #else
     if (Rank0 < hit + 64*2 - xx.rlev[2]) {
         if (Rank0 < hit + 64*1 - xx.rlev[1]) { // xx.rlev[0] is always 0
             return index + 64*0 + UintSelect1(~xx.bit64[0], Rank0 - hit);
@@ -571,13 +590,16 @@ size_t rank_select_mixed_il_256::select0_dx(size_t Rank0) const noexcept {
         return index + 64*3 + UintSelect1(
                 ~xx.bit64[3], Rank0 - (hit + 64*3 - xx.rlev[3]));
     }
+  #endif
 }
 
 template size_t TERARK_DLL_EXPORT rank_select_mixed_il_256::select0_dx<0>(size_t Rank0) const noexcept;
 template size_t TERARK_DLL_EXPORT rank_select_mixed_il_256::select0_dx<1>(size_t Rank0) const noexcept;
 
 template<size_t dimensions>
-size_t rank_select_mixed_il_256::select1_dx(size_t Rank1) const noexcept {
+inline
+size_t rank_select_mixed_il_256::select1_upper_bound_line_safe(size_t Rank1)
+const noexcept {
     assert(m_flags & (1 << (dimensions == 0 ? 1 : 4)));
     GUARD_MAX_RANK(1[dimensions], Rank1);
     size_t lo, hi;
@@ -598,11 +620,26 @@ size_t rank_select_mixed_il_256::select1_dx(size_t Rank1) const noexcept {
         else
             hi = mid;
     }
+    return lo;
+}
+template<size_t dimensions>
+size_t rank_select_mixed_il_256::select1_dx(size_t Rank1) const noexcept {
+    size_t lo = select1_upper_bound_line_safe<dimensions>(Rank1);
     assert(Rank1 < m_lines[lo].mixed[dimensions].base);
     const auto& xx = m_lines[lo - 1].mixed[dimensions];
     size_t hit = xx.base;
     assert(Rank1 >= hit);
     size_t index = (lo-1) * LineBits; // base bit index
+  #if defined(__AVX512VL__) && defined(__AVX512BW__)
+    __m128i arr = _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*(uint32_t*)xx.rlev));
+    __m128i key = _mm_set1_epi32(uint32_t(Rank1 - hit));
+    __mmask8 cmp = _mm_cmpgt_epi32_mask(arr, key);
+    auto tz = _tzcnt_u32(cmp | (1u << 4)); // upper bound
+    TERARK_ASSERT_GE(tz, 1);
+    TERARK_ASSERT_LE(tz, 4);
+    tz -= 1;
+    return index + 64 * tz + UintSelect1(xx.bit64[tz], Rank1 - (hit + xx.rlev[tz]));
+  #else
     if (Rank1 < hit + xx.rlev[2]) {
         if (Rank1 < hit + xx.rlev[1]) { // xx.rlev[0] is always 0
             return index + UintSelect1(xx.bit64[0], Rank1 - hit);
@@ -618,6 +655,7 @@ size_t rank_select_mixed_il_256::select1_dx(size_t Rank1) const noexcept {
         return index + 64*3 + UintSelect1(
                  xx.bit64[3], Rank1 - (hit + xx.rlev[3]));
     }
+  #endif
 }
 
 template size_t TERARK_DLL_EXPORT rank_select_mixed_il_256::select1_dx<0>(size_t Rank1) const noexcept;

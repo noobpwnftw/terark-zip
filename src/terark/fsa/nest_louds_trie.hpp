@@ -110,7 +110,12 @@ public: // protected:
     valvec<uint32_t>    m_sel0_cache;
 #endif
 	valvec<layer_id_rank_t> m_layer_id_rank;
-	valvec<layer_ref_t> m_layer_ref;
+	const layer_ref_t*  m_layer_ref = nullptr;
+	void risk_layer_load_user_mem(const void* mem, size_t num, size_t len);
+	auto layer_vec_size() { return m_layer_id_rank.size(); }
+	auto layer_data_ptr() { return m_layer_id_rank.data(); }
+	auto layer_data_len() { return m_layer_id_rank.size() * (sizeof(layer_id_rank_t) + sizeof(layer_ref_t)); }
+
 	uint32_t            m_max_layer_id;
 	uint32_t            m_max_layer_size;
 
@@ -160,9 +165,10 @@ public:
     byte_t getNthChar(size_t child0, size_t lcount, size_t nth) const noexcept;
     byte_t getNthCharNext(size_t child0, size_t lcount, size_t nth, byte_t cch) const noexcept;
     byte_t getNthCharPrev(size_t child0, size_t lcount, size_t nth, byte_t cch) const noexcept;
-	size_t getZpathFixed(size_t, byte_t* buf, size_t cap) const noexcept;
-    intptr_t matchZpath(size_t, const byte_t* str, size_t slen) const noexcept;
-	intptr_t matchZpath_loop(size_t, intptr_t, const byte_t* str, intptr_t slen) const noexcept;
+    size_t getZpathFixed(size_t, byte_t* buf, size_t cap) const noexcept;
+    intptr_t matchZpath(size_t, const byte_t* str, size_t slen) const noexcept terark_pure_func;
+    intptr_t matchZpath_link(uint64_t linkVal, const byte_t* str, size_t slen) const noexcept terark_pure_func;
+    intptr_t matchZpath_loop(size_t, intptr_t, const byte_t* str, intptr_t slen) const noexcept terark_pure_func;
 
 	NestLoudsTrieTpl();
 	NestLoudsTrieTpl(const NestLoudsTrieTpl&);
@@ -173,13 +179,15 @@ public:
 	void swap(NestLoudsTrieTpl&) noexcept;
 
 	size_t total_states() const { return m_is_link.size(); }
-	size_t mem_size() const noexcept;
-	size_t nest_level() const noexcept;
-	size_t core_mem_size() const noexcept;
+	size_t mem_size() const noexcept terark_pure_func;
+	size_t nest_level() const noexcept terark_pure_func;
+	size_t core_mem_size() const noexcept terark_pure_func;
 
-	size_t get_parent(size_t child) const noexcept;
-	uint64_t get_link_val(size_t node_id) const noexcept;
-	fstring get_core_str(size_t node_id) const noexcept;
+	size_t get_parent(size_t child) const noexcept terark_pure_func;
+	size_t get_link_rank(size_t node_id) const noexcept terark_pure_func;
+	uint64_t get_link_val_by_rank(size_t node_id, size_t linkRank1) const noexcept terark_pure_func;
+	uint64_t get_link_val(size_t node_id) const noexcept terark_pure_func;
+	fstring get_core_str(size_t node_id) const noexcept terark_pure_func;
 
 	void restore_string_append(size_t node_id, valvec<byte_t>* str) const noexcept;
 	void restore_string_append(size_t node_id, std::string   * str) const noexcept;
@@ -267,16 +275,24 @@ public:
 		size_t n_children;
 		size_t child0;
 	};
-	size_t state_move(size_t, auchar_t ch) const noexcept;
-    std::pair<size_t, bool> state_move_lower_bound(size_t, auchar_t ch) const noexcept;
+	size_t state_move(size_t, auchar_t ch) const noexcept terark_pure_func;
+    std::pair<size_t, bool> state_move_lower_bound(size_t, auchar_t ch) const noexcept terark_pure_func;
 	size_t state_move_slow(size_t, auchar_t ch, StateMoveContext& ctx) const noexcept;
-	size_t state_move_fast(size_t, auchar_t ch, size_t n_children, size_t child0) const noexcept;
+	size_t state_move_fast(size_t, auchar_t ch, size_t n_children, size_t child0) const noexcept terark_pure_func;
 	size_t state_move_fast(size_t parent, auchar_t ch, const StateMoveContext& ctx) const noexcept {
 		return state_move_fast(parent, ch, ctx.n_children, ctx.child0);
 	}
     template<class LoudsBits, class LoudsSel, class LoudsRank>
     size_t state_move_fast2(size_t parent, byte_t ch, const byte_t* label,
-                            const LoudsBits*, const LoudsSel* sel0, const LoudsRank*) const noexcept;
+                            const LoudsBits*, const LoudsSel* sel0, const LoudsRank*) const noexcept terark_pure_func;
+    template<class LoudsBits, class LoudsSel, class LoudsRank>
+    std::pair<size_t, size_t> // auto [child0, lcount] = children_range(...)
+    find_children_range(size_t parent, const byte_t* label, // label for prefetch
+                        const LoudsBits*, const LoudsSel* sel0, const LoudsRank*) const noexcept terark_pure_func;
+    size_t find_child(std::pair<size_t, size_t> children_range, byte_t ch, const byte_t* label) const noexcept terark_pure_func;
+    size_t find_child_max_35(size_t child0, size_t lcount, byte_t ch, const byte_t* label) const noexcept terark_pure_func;
+    size_t find_child_bitmap(size_t child0, byte_t ch, const byte_t* label) const noexcept terark_pure_func;
+    size_t find_child_SlowLabel(size_t child0, size_t lcount, byte_t ch, const byte_t* label) const noexcept terark_pure_func;
 
     template<bool HasLink>
     size_t state_move_smart(size_t s, auchar_t ch) const noexcept {
@@ -294,9 +310,9 @@ public:
             return state_move_lower_bound_no_link(s, ch);
     }
 private:
-    size_t state_move_no_link(size_t, auchar_t ch) const noexcept;
+    size_t state_move_no_link(size_t, auchar_t ch) const noexcept terark_pure_func;
     std::pair<size_t, bool>
-    state_move_lower_bound_no_link(size_t, auchar_t ch) const noexcept;
+    state_move_lower_bound_no_link(size_t, auchar_t ch) const noexcept terark_pure_func;
 
 public:
     template<class RankSelectTerm>

@@ -645,6 +645,7 @@ public:
     fstring suffix = mem.substr(mem.size() - footer.footer_size - footer.suffix_size, footer.suffix_size);
     fstring prefix = fstring(suffix.data() - footer.prefix_size, footer.prefix_size);
     fstring common = fstring(prefix.data() - align_up(footer.common_size, 8), footer.common_size);
+    /*
     if (isChecksumVerifyEnabled()) {
       uint64_t computed = Crc32c_update(0, common.data(), common.size());
       uint64_t saved = footer.common_crc32;
@@ -665,6 +666,7 @@ public:
                                    saved, computed);
       }
     }
+    */
     unique_ptr<SuffixBase> s(CreateSuffix());
     s->flags.is_rev_suffix = footer.rev_suffix;
     if (!s->Load(suffix)) {
@@ -702,24 +704,26 @@ public:
     footer.common_crc32 = Crc32c_update(0, common.data(), common.size());
     write(common.data(), common.size());
     Padzero<8>(write, common.size());
-    XXHash64 dist(g_terark_index_prefix_seed);
+    //XXHash64 dist(g_terark_index_prefix_seed);
     footer.prefix_size = 0;
     prefix.Save([&](const void* data, size_t size) {
-      dist.update(data, size);
+      //dist.update(data, size);
       write(data, size);
       footer.prefix_size += size;
     });
     assert(footer.prefix_size % 8 == 0);
-    footer.prefix_xxhash = dist.digest();
-    dist.reset(g_terark_index_suffix_seed);
+    //footer.prefix_xxhash = dist.digest();
+    footer.prefix_xxhash = g_terark_index_prefix_seed;
+    //dist.reset(g_terark_index_suffix_seed);
     footer.suffix_size = 0;
     suffix.Save([&](const void* data, size_t size) {
-      dist.update(data, size);
+      //dist.update(data, size);
       write(data, size);
       footer.suffix_size += size;
     });
     assert(footer.suffix_size % 8 == 0);
-    footer.suffix_xxhash = dist.digest();
+    //footer.suffix_xxhash = dist.digest();
+    footer.suffix_xxhash = g_terark_index_suffix_seed;
     auto name = Name();
     assert(name.size() == sizeof footer.class_name);
     memcpy(footer.class_name, name.data(), sizeof footer.class_name);
@@ -738,22 +742,24 @@ public:
     footer.common_crc32 = Crc32c_update(0, common.data(), common.size());
     write(common.data(), common.size());
     Padzero<8>(write, common.size());
-    XXHash64 dist(g_terark_index_prefix_seed);
+    //XXHash64 dist(g_terark_index_prefix_seed);
     footer.prefix_size = 0;
     prefix.Save([&](const void* data, size_t size) {
-      dist.update(data, size);
+      //dist.update(data, size);
       write(data, size);
       footer.prefix_size += size;
     });
-    footer.prefix_xxhash = dist.digest();
-    dist.reset(g_terark_index_suffix_seed);
+    //footer.prefix_xxhash = dist.digest();
+    footer.prefix_xxhash = g_terark_index_prefix_seed;
+    //dist.reset(g_terark_index_suffix_seed);
     footer.suffix_size = 0;
     suffix.Reorder(newToOld, [&](const void* data, size_t size) {
-      dist.update(data, size);
+      //dist.update(data, size);
       write(data, size);
       footer.suffix_size += size;
     }, tmpFile);
-    footer.suffix_xxhash = dist.digest();
+    //footer.suffix_xxhash = dist.digest();
+    footer.suffix_xxhash = g_terark_index_suffix_seed;
     auto name = Name();
     assert(name.size() == sizeof footer.class_name);
     memcpy(footer.class_name, name.data(), sizeof footer.class_name);

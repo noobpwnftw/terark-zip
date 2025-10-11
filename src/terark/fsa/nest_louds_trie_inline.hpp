@@ -228,6 +228,17 @@ state_move_fast2(size_t parent, byte_t ch, const byte_t* label,
 const noexcept {
     assert(ch < 256);
     assert(parent < total_states());
+    auto children_range = find_children_range(parent, label, bits, sel0, rank);
+    return find_child(children_range, ch, label);
+}
+template<class RankSelect, class RankSelect2, bool FastLabel>
+template<class LoudsBits, class LoudsSel, class LoudsRank>
+terark_forceinline
+std::pair<size_t, size_t>
+NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
+find_children_range(size_t parent, const byte_t* label, const LoudsBits* bits, const LoudsSel* sel0, const LoudsRank* rank)
+const noexcept {
+    assert(parent < total_states());
 #if !defined(TERARK_NLT_ENABLE_SEL0_CACHE)
     size_t bitpos = RankSelect::fast_select0(bits, sel0, rank, parent);
 #else
@@ -240,11 +251,17 @@ const noexcept {
     size_t child0 = bitpos - parent;
     label += child0;
     _mm_prefetch((const char*)label, _MM_HINT_T0);
-    m_is_link.prefetch_bit(child0); // prefetch for next search
     size_t lcount = RankSelect::fast_one_seq_len(bits, bitpos+1);
     assert(child0 + lcount <= total_states());
-    if (FastLabel) {
-        if (lcount < 36) {
+    if (lcount > 0)
+        m_is_link.prefetch_bit(child0); // prefetch for next search
+    return std::pair<size_t, size_t>(child0, lcount);
+}
+template<class RankSelect, class RankSelect2, bool FastLabel>
+terark_forceinline
+size_t NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
+find_child_max_35(size_t child0, size_t lcount, byte_t ch, const byte_t* label)
+const noexcept {
           #if defined(__AVX512VL__) && defined(__AVX512BW__)
             size_t i = fast_search_byte_max_35(label, lcount, ch);
             if (i < lcount) // not need check label[i] == ch
@@ -266,8 +283,14 @@ const noexcept {
                 if (i < lcount && label[i] == ch)
                     return child0 + i;
             }
-        }
-        else {
+            return nil_state;
+}
+template<class RankSelect, class RankSelect2, bool FastLabel>
+terark_forceinline
+size_t NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
+find_child_bitmap(size_t child0, byte_t ch, const byte_t* label)
+const noexcept {
+        {
 #if 0
             if (terark_bit_test((size_t*)(label + 4), ch)) {
                 size_t i = fast_search_byte_rs_idx(label, ch);
@@ -282,8 +305,33 @@ const noexcept {
 #endif
         }
         return nil_state;
+}
+template<class RankSelect, class RankSelect2, bool FastLabel>
+terark_forceinline
+size_t NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
+find_child(std::pair<size_t, size_t> children, byte_t ch, const byte_t* label)
+const noexcept {
+    //auto [child0, lcount] = children;
+    auto child0 = children.first;
+    auto lcount = children.second;
+    label += child0;
+    if (FastLabel) {
+        if (lcount < 36) {
+            return find_child_max_35(child0, lcount, ch, label);
+        } else {
+            return find_child_bitmap(child0, ch, label);
+        }
     }
     else {
+        return find_child_SlowLabel(child0, lcount, ch, label);
+    }
+}
+template<class RankSelect, class RankSelect2, bool FastLabel>
+terark_forceinline
+size_t NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
+find_child_SlowLabel(size_t child0, size_t lcount, byte_t ch, const byte_t* label)
+const noexcept {
+    {
         if (false/*true*//*lcount > 6*/) {
             // this is slower :(
         #if 0
@@ -440,18 +488,24 @@ init_for_term(const RankSelectTerm& is_term) {
     TERARK_VERIFY_EQ(id, m_louds.max_rank1());
 
     index_t layer_max = m_layer_id_rank.size();
-    m_layer_ref.resize_no_init(layer_max);
+    // layer_ref and m_layer_id_rank are parallel array
+    auto layer_ref = (layer_ref_t*)m_layer_id_rank.grow_capacity(
+        (layer_max + 1) * sizeof(layer_ref_t) / sizeof(layer_id_rank_t));
+    TERARK_VERIFY_GE(m_layer_id_rank.full_mem_size(),
+        (sizeof(layer_ref_t) + sizeof(layer_id_rank_t)) * layer_max);
+
     index_t layer_id = 0, layer_size = 0;
     for (index_t i = 0; i < layer_max; ++i) {
         index_t end_id = i == layer_max - 1
                        ? (index_t)is_term.size() : m_layer_id_rank[i + 1].id;
-        m_layer_ref[i] = layer_ref_t{m_layer_id_rank[i].id, end_id, 0};
+        layer_ref[i] = layer_ref_t{m_layer_id_rank[i].id, end_id, 0};
         index_t size = end_id - m_layer_id_rank[i].id;
         if (size > layer_size) {
             layer_id = i;
             layer_size = size;
         }
     }
+    m_layer_ref = layer_ref;
     m_max_layer_id = layer_id;
     m_max_layer_size = layer_size;
 }
@@ -820,10 +874,12 @@ dict_rank_to_state(size_t index, const RankSelectTerm& is_term) const noexcept {
     assert(index < m_louds.max_rank1());
     size_t layer_max = m_layer_id_rank.size();
 #if 0
-    valvec<layer_ref_t> layer = m_layer_ref;
+    valvec<layer_ref_t> layer(m_layer_ref, m_layer_id_rank.size());
 #else
-    layer_ref_t* layer = (layer_ref_t*)alloca(m_layer_ref.used_mem_size());
-    memcpy(layer, m_layer_ref.data(), m_layer_ref.used_mem_size());
+    TERARK_ASSERT_EQ((void*)m_layer_ref, m_layer_id_rank.end());
+    size_t layer_ref_mem_size = sizeof(layer_ref_t) * m_layer_id_rank.size();
+    layer_ref_t* layer = (layer_ref_t*)alloca(layer_ref_mem_size);
+    memcpy(layer, m_layer_ref, layer_ref_mem_size);
 #endif
     size_t layer_id = m_max_layer_id, layer_size = m_max_layer_size;
     while (true) {
@@ -926,6 +982,23 @@ get_link_val(size_t node_id) const noexcept {
 	assert(node_id > 0);
 	assert(node_id < m_is_link.size());
 	size_t linkRank1 = m_is_link.rank1(node_id);
+    return get_link_val_by_rank(node_id, linkRank1);
+}
+template<class RankSelect, class RankSelect2, bool FastLabel>
+inline size_t
+NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
+get_link_rank(size_t node_id) const noexcept {
+	assert(node_id > 0);
+	TERARK_ASSERT_LT(node_id, m_is_link.size());
+	return m_is_link.rank1(node_id);
+}
+template<class RankSelect, class RankSelect2, bool FastLabel>
+inline uint64_t
+NestLoudsTrieTpl<RankSelect, RankSelect2, FastLabel>::
+get_link_val_by_rank(size_t node_id, size_t linkRank1) const noexcept {
+	assert(node_id > 0);
+	TERARK_ASSERT_LT(node_id, m_is_link.size());
+	TERARK_ASSERT_LT(linkRank1, m_is_link.max_rank1());
 	if (FastLabel) {
 		return m_next_link[linkRank1];
 	}
